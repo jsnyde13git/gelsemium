@@ -9,6 +9,7 @@ use std::iter::Peekable;
 use rodio::{Decoder, Source};
 
 use rust_music_player::playlist_parser::parse_playlists;
+use rust_music_player::playlist_parser::get_playlist_filepaths;
 
 fn main() {
     // Take all non-initial CLI arguments and put them into a string.
@@ -165,56 +166,7 @@ fn get_playlists_file() -> String{
     panic!("Unsupported OS. Supported OSes are: Linux");
 }
 
-// Converts the list of folder & filenames into just a list of filenames.
-// Prints errors.
-fn get_playlist_filepaths(filepaths: &Vec<String>) -> (Vec<PathBuf>, Vec<io::Error>){
-    let mut errs: Vec<io::Error> = Vec::new();
-    let mut result: Vec<PathBuf> = Vec::new();
-    
-    for filepath_str in filepaths{
-        let path = PathBuf::from(filepath_str);
-        let (mut path_result, mut path_errs) 
-            = expand_playlist_directory(path);
-        errs.append(&mut path_errs);
-        result.append(&mut path_result);
-    }
 
-    (result, errs)
-}
-
-// Receives a path that may or may not be a directory,
-// and returns every file & folder in that directory.
-// Runs recursively on each subdirectory.
-fn expand_playlist_directory(dir: PathBuf) -> (Vec<PathBuf>, Vec<io::Error>){
-    if dir.is_dir(){
-        // for each entry in dir_path, find its name as a string,
-        // then call expand playlist directory recursively on each
-        let dir_contents_maybe = dir.read_dir();
-        if let Err(err) = dir_contents_maybe{
-            return (Vec::new(), vec![err])
-        }
-        let dir_contents = dir_contents_maybe.unwrap();
-        let mut result: Vec<PathBuf> = Vec::new();
-        let mut errs: Vec<io::Error> = Vec::new();
-
-        for entry_maybe in dir_contents{
-            match entry_maybe{
-                Err(err) => errs.push(err),
-                Ok(entry) => {
-                    let mut entry_contents = 
-                        expand_playlist_directory(entry.path());
-                    result.append(&mut entry_contents.0);
-                    errs.append(&mut entry_contents.1);
-                }
-            }
-        }
-        
-        (result, errs)
-    }else{
-        // We assume all file paths are UTF-8.
-        (vec![dir], Vec::new())
-    }
-}
 
 fn play_file_list(player: Arc<rodio::Player>, filepaths: &Vec<PathBuf>, command_queue: Arc<PlayerCommandQueue>){
     for filepath in filepaths.iter(){

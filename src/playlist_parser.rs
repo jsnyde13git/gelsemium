@@ -1,5 +1,12 @@
 use std::collections::HashMap;
 use std::iter::{Iterator, Peekable};
+use std::env;
+use std::path::{Path, PathBuf};
+use std::process::exit;
+use std::sync::{Arc, Condvar, Mutex};
+use std::{fs::File};
+use std::io::{self, BufReader};
+use rodio::{Decoder, Source};
 
 pub fn parse_playlists(playlist_str: &str) -> Result<HashMap<String, Vec<String>>, PlaylistParseError>{
     let mut playlist_str_iter = playlist_str
@@ -118,4 +125,56 @@ fn parse_playlist_song(playlist_iter: &mut Peekable<impl Iterator<Item = (usize,
 #[derive(Debug)]
 pub enum PlaylistParseError{
     UnclosedBracket{line: usize, col: usize}
+}
+
+
+// Converts the list of folder & filenames into just a list of filenames.
+// Prints errors.
+pub fn get_playlist_filepaths(filepaths: &Vec<String>) -> (Vec<PathBuf>, Vec<io::Error>){
+    let mut errs: Vec<io::Error> = Vec::new();
+    let mut result: Vec<PathBuf> = Vec::new();
+    
+    for filepath_str in filepaths{
+        let path = PathBuf::from(filepath_str);
+        let (mut path_result, mut path_errs) 
+            = expand_playlist_directory(path);
+        errs.append(&mut path_errs);
+        result.append(&mut path_result);
+    }
+
+    (result, errs)
+}
+
+// Receives a path that may or may not be a directory,
+// and returns every file & folder in that directory.
+// Runs recursively on each subdirectory.
+fn expand_playlist_directory(dir: PathBuf) -> (Vec<PathBuf>, Vec<io::Error>){
+    if dir.is_dir(){
+        // for each entry in dir_path, find its name as a string,
+        // then call expand playlist directory recursively on each
+        let dir_contents_maybe = dir.read_dir();
+        if let Err(err) = dir_contents_maybe{
+            return (Vec::new(), vec![err])
+        }
+        let dir_contents = dir_contents_maybe.unwrap();
+        let mut result: Vec<PathBuf> = Vec::new();
+        let mut errs: Vec<io::Error> = Vec::new();
+
+        for entry_maybe in dir_contents{
+            match entry_maybe{
+                Err(err) => errs.push(err),
+                Ok(entry) => {
+                    let mut entry_contents = 
+                        expand_playlist_directory(entry.path());
+                    result.append(&mut entry_contents.0);
+                    errs.append(&mut entry_contents.1);
+                }
+            }
+        }
+        
+        (result, errs)
+    }else{
+        // We assume all file paths are UTF-8.
+        (vec![dir], Vec::new())
+    }
 }
