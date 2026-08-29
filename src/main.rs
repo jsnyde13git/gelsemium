@@ -1,11 +1,11 @@
+use std::collections::VecDeque;
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
 use std::process::exit;
 use std::sync::{Arc, Condvar, Mutex};
-use std::{collections::HashMap, fs::File};
+use std::{fs::File};
 use std::io::{self, BufReader};
 use std::iter::Iterator;
-use std::iter::Peekable;
 use rodio::{Decoder, Source};
 
 use rust_music_player::playlist_parser::parse_playlists;
@@ -68,7 +68,12 @@ fn main() {
             println!("s: Skip");
             println!("d/e: Volume down/up");
             println!("p: Pause/Play");
-            play_file_list(player, &playlist, command_queue);
+            // TODO: Remove this clone.
+            // I plan to revamp the playlist data structure anyway, 
+            // so a little clone here is only temporary.
+            // xkcd 2730
+            let playlist_paths = playlist.into_iter().map(|x| x.1.clone()).collect::<Vec<PathBuf>>();
+            play_file_list(player, &playlist_paths, command_queue);
         },
         None => {
             // Default option. Opens the GUI.
@@ -77,6 +82,36 @@ fn main() {
             ui.run().expect("Something failed when starting the UI");
         }
         _ => eprintln!("Unrecognized command")
+    }
+}
+
+struct SongQueue{
+    immediate: VecDeque<(u8, PathBuf)>,
+    back: VecDeque<(u8, PathBuf)>,
+}
+
+impl Iterator for SongQueue{
+    type Item = (u8, PathBuf);
+
+    fn next(&mut self) -> Option<Self::Item>{
+        if !self.immediate.is_empty(){
+            return self.immediate.pop_front();
+        }else{
+            return self.back.pop_front();
+        }
+    }
+}
+
+impl SongQueue{
+    fn new(songs: Vec<(u8, PathBuf)>) -> SongQueue{
+        SongQueue{
+            immediate: VecDeque::new(),
+            back: VecDeque::from(songs),
+        }
+    }
+
+    fn queue_immediate(&mut self, item: (u8, PathBuf)){
+        self.immediate.push_back(item);
     }
 }
 
@@ -166,6 +201,12 @@ fn listen_for_cli_controls(cmd_queue: &PlayerCommandQueue) -> !{
 }
 
 fn get_playlists_file() -> String{
+    // Check GELSEMIUM_MUSIC_PLAYER_DIR environment variable
+    // If set, use that directory
+    // Else check if Windows
+    // If set, use <user>/Program Files/Local/GelsemiumMusicPlayer
+    // Else check if Linux
+    // If set, use ~/.local/share/GelsemiumMusicPlayer
     if cfg!(target_os = "linux"){
         return "playlists.txt".to_string();
     }
@@ -176,7 +217,9 @@ fn get_playlists_file() -> String{
 
 
 fn play_file_list(player: Arc<rodio::Player>, filepaths: &Vec<PathBuf>, command_queue: Arc<PlayerCommandQueue>){
-    for filepath in filepaths.iter(){
+    let mut file_iter = filepaths.iter();
+
+    while let Some(filepath) = file_iter.next(){
         // Open file.
         let file_maybe = File::open(filepath);
         if let Err(error) = file_maybe{

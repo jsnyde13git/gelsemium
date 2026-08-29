@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use std::iter::{Iterator, Peekable};
-use std::path::{Path, PathBuf};
-use std::{fs::File};
-use std::io::{self, BufReader};
+use std::path::PathBuf;
+use std::io;
 
 pub fn parse_playlists(playlist_str: &str) -> Result<HashMap<String, Vec<String>>, PlaylistParseError>{
     let mut playlist_str_iter = playlist_str
@@ -126,14 +125,14 @@ pub enum PlaylistParseError{
 
 // Converts the list of folder & filenames into just a list of filenames.
 // Prints errors.
-pub fn get_playlist_filepaths(filepaths: &Vec<String>) -> (Vec<PathBuf>, Vec<io::Error>){
+pub fn get_playlist_filepaths(filepaths: &Vec<String>) -> (Vec<(u8, PathBuf)>, Vec<io::Error>){
     let mut errs: Vec<io::Error> = Vec::new();
-    let mut result: Vec<PathBuf> = Vec::new();
+    let mut result: Vec<(u8, PathBuf)> = Vec::new();
     
     for filepath_str in filepaths{
         let path = PathBuf::from(filepath_str);
         let (mut path_result, mut path_errs) 
-            = expand_playlist_directory(path);
+            = expand_playlist_directory(path, 0);
         errs.append(&mut path_errs);
         result.append(&mut path_result);
     }
@@ -144,7 +143,7 @@ pub fn get_playlist_filepaths(filepaths: &Vec<String>) -> (Vec<PathBuf>, Vec<io:
 // Receives a path that may or may not be a directory,
 // and returns every file & folder in that directory.
 // Runs recursively on each subdirectory.
-fn expand_playlist_directory(dir: PathBuf) -> (Vec<PathBuf>, Vec<io::Error>){
+fn expand_playlist_directory(dir: PathBuf, layer: u8) -> (Vec<(u8, PathBuf)>, Vec<io::Error>){
     if dir.is_dir(){
         // for each entry in dir_path, find its name as a string,
         // then call expand playlist directory recursively on each
@@ -153,7 +152,7 @@ fn expand_playlist_directory(dir: PathBuf) -> (Vec<PathBuf>, Vec<io::Error>){
             return (Vec::new(), vec![err])
         }
         let dir_contents = dir_contents_maybe.unwrap();
-        let mut result: Vec<PathBuf> = Vec::new();
+        let mut result: Vec<(u8, PathBuf)> = Vec::new();
         let mut errs: Vec<io::Error> = Vec::new();
 
         for entry_maybe in dir_contents{
@@ -161,7 +160,7 @@ fn expand_playlist_directory(dir: PathBuf) -> (Vec<PathBuf>, Vec<io::Error>){
                 Err(err) => errs.push(err),
                 Ok(entry) => {
                     let mut entry_contents = 
-                        expand_playlist_directory(entry.path());
+                        expand_playlist_directory(entry.path(), layer.saturating_add(1));
                     result.append(&mut entry_contents.0);
                     errs.append(&mut entry_contents.1);
                 }
@@ -171,12 +170,19 @@ fn expand_playlist_directory(dir: PathBuf) -> (Vec<PathBuf>, Vec<io::Error>){
         (result, errs)
     }else{
         // We assume all file paths are UTF-8.
-        (vec![dir], Vec::new())
+        (vec![(layer, dir)], Vec::new())
     }
 }
 
 
 // Filter the filetypes to be mp3, ogg, wav, perhaps others if compatible
-fn filter_filetypes(filepaths: &mut Vec<PathBuf>){
-    todo!()
+pub fn filter_filetypes(filepaths: &mut Vec<(u8, PathBuf)>){
+    filepaths.retain(|(_, filepath)| 
+        filepath
+        .extension()
+        .is_some_and(|extension| 
+            extension == "mp3" || 
+            extension == "ogg" || 
+            extension == "wav" || 
+            extension == "flac"));
 }
