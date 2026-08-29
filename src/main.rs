@@ -11,6 +11,8 @@ use rodio::{Decoder, Source};
 use rust_music_player::playlist_parser::parse_playlists;
 use rust_music_player::playlist_parser::get_playlist_filepaths;
 
+slint::include_modules!();
+
 fn main() {
     // Take all non-initial CLI arguments and put them into a string.
     // Read the playlists.
@@ -21,9 +23,8 @@ fn main() {
     if command_maybe.is_none(){
         eprintln!("No arguments given. Valid arguments are: play <playlistname>");
     }
-    let command = command_maybe.unwrap();
-    match command.as_str(){
-        "play" => {
+    match command_maybe{
+        Some(s) if s == "play" => {
             // Read playlists.
             let playlist_file = get_playlists_file();
             let playlist_file_contents_maybe = std::fs::read_to_string(playlist_file);
@@ -68,6 +69,12 @@ fn main() {
             println!("d/e: Volume down/up");
             println!("p: Pause/Play");
             play_file_list(player, &playlist, command_queue);
+        },
+        None => {
+            // Default option. Opens the GUI.
+            let ui = AppWindow::new().unwrap();
+            ui.on_play_playlist(move |playlist_name| println!("{playlist_name}"));
+            ui.run().expect("Something failed when starting the UI");
         }
         _ => eprintln!("Unrecognized command")
     }

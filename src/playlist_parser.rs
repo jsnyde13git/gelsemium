@@ -1,12 +1,8 @@
 use std::collections::HashMap;
 use std::iter::{Iterator, Peekable};
-use std::env;
 use std::path::{Path, PathBuf};
-use std::process::exit;
-use std::sync::{Arc, Condvar, Mutex};
 use std::{fs::File};
 use std::io::{self, BufReader};
-use rodio::{Decoder, Source};
 
 pub fn parse_playlists(playlist_str: &str) -> Result<HashMap<String, Vec<String>>, PlaylistParseError>{
     let mut playlist_str_iter = playlist_str
@@ -177,4 +173,10 @@ fn expand_playlist_directory(dir: PathBuf) -> (Vec<PathBuf>, Vec<io::Error>){
         // We assume all file paths are UTF-8.
         (vec![dir], Vec::new())
     }
+}
+
+
+// Filter the filetypes to be mp3, ogg, wav, perhaps others if compatible
+fn filter_filetypes(filepaths: &mut Vec<PathBuf>){
+    todo!()
 }

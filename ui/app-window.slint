@@ -1,0 +1,131 @@
+import { Button, VerticalBox, TextEdit, HorizontalBox } from "std-widgets.slint";
+
+// All songs in the library.
+component SongLibrary inherits Rectangle{
+    background: #672b78;
+}
+
+// Queue of currently-playing songs.
+component SongQueue inherits Rectangle{
+    in property<[string]> song_names: ["examplesong1", "exsong2", "exsong3"];
+    background: #672b78;
+
+    VerticalLayout{
+        alignment: start;
+        for song[i] in song_names: HorizontalBox{
+            alignment: start;
+            Text{
+                text: song;
+                horizontal-alignment: start;
+            }
+        }
+    }
+    
+}
+
+component PlayerControls inherits VerticalBox{
+    // Album cover.
+    Image{
+
+    }
+    // Control buttons.
+    HorizontalBox {
+        Image{
+            source: @image-url("playbutton.svg");
+            colorize: #fbb5fb;
+        }
+    }
+}
+
+// Component that displays when a playlist is being played currently.
+component PlayingMenu inherits Rectangle{
+    in property <[string]> song_names;
+    HorizontalBox {
+        alignment: stretch;
+
+        VerticalBox {
+            width: 50%;
+            PlayerControls {
+
+            }
+            SongQueue{
+
+            }
+        }
+        
+        
+        SongLibrary {
+            width: 50%;
+
+        }
+    }
+}
+
+component PlaylistPlayable inherits Rectangle{
+    width: 90%;
+    background: #f74cf7;
+    in property <string> playlist_name;
+    callback clicked(string);
+    
+    HorizontalBox{
+        // name
+        Text{
+            height: 70px;
+            text: playlist_name;
+            horizontal-alignment: left;
+            font-size: 36pt;
+        }
+        // spacer
+        Rectangle{}
+        // play button
+        Image{
+            source: @image-url("playbutton.svg");
+            colorize: #fbb5fb;
+            TouchArea{
+                clicked => { root.clicked(playlist_name); }
+            }
+        }
+    }
+}
+
+component PlaylistSelect inherits Rectangle{
+    background: #f675f6;
+    callback play_clicked(string);
+
+    Rectangle {
+        width: 50%;
+        height: 80%;
+        background: #672b78;
+        VerticalBox{
+            alignment: start;
+            PlaylistPlayable{
+                playlist_name: "Example Playlist";
+                clicked(s) => play_clicked(s);
+            }
+            PlaylistPlayable{
+                playlist_name: "Example Playlist 2.0";
+                clicked(s) => play_clicked(s);
+            }
+        }
+        
+    }
+}
+
+enum ScreenState{ select, playing, editing}
+export component AppWindow inherits Window {
+    callback play_playlist(string);
+    maximized: true;
+    title: "Gelsemium Music Player";
+
+    property <ScreenState> state: select;
+    if state == ScreenState.select: PlaylistSelect{
+        play_clicked(playlist_name) => {
+            state = ScreenState.playing;
+            play_playlist(playlist_name);
+        };
+    }
+    if state == ScreenState.playing: PlayingMenu{}
+    
+}
+
+
