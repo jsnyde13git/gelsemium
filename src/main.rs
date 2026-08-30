@@ -79,6 +79,13 @@ fn main() {
             // Default option. Opens the GUI.
             let ui = AppWindow::new().unwrap();
             ui.on_play_playlist(move |playlist_name| println!("{playlist_name}"));
+            // attempt at maximization code
+            // might be bugged in slint itself?
+            // ui.window().set_maximized(true);
+            // let maximize_ptr = ui.as_weak();
+            // slint::invoke_from_event_loop(move || {
+            //     maximize_ptr.unwrap().window().set_maximized(true); println!("maximized")
+            // }).unwrap();
             ui.run().expect("Something failed when starting the UI");
         }
         _ => eprintln!("Unrecognized command")
@@ -110,8 +117,8 @@ impl SongQueue{
         }
     }
 
-    fn queue_immediate(&mut self, item: (u8, PathBuf)){
-        self.immediate.push_back(item);
+    fn queue_immediate(&mut self, item: PathBuf){
+        self.immediate.push_back((0, item));
     }
 }
 

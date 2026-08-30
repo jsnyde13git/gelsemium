@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 rodio = {version = "0.22.2", features = ["symphonia-isomp4", "symphonia-all"]}
-slint = "1.16.1"
+slint = "1.17.1"
 
 [build-dependencies]
-slint-build = "1.16.1"
+slint-build = "1.17.1"

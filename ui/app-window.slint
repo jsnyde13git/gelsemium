@@ -1,21 +1,33 @@
 import { Button, VerticalBox, TextEdit, HorizontalBox } from "std-widgets.slint";
+import "./LeagueMono-VF.ttf";
 
 // All songs in the library.
 component SongLibrary inherits Rectangle{
     background: #672b78;
 }
 
+struct SongOrFolder{
+    name: string,
+    nest_level: int,
+}
+
 // Queue of currently-playing songs.
 component SongQueue inherits Rectangle{
-    in property<[string]> song_names: ["examplesong1", "exsong2", "exsong3"];
+    in property<[SongOrFolder]> song_names: [
+        {name: "examplesong1", nest_level: 0}, 
+        {name: "examplesong2", nest_level: 1}, 
+        {name: "examplesong3", nest_level: 2}, 
+        {name: "examplesong4", nest_level: 0}];
     background: #672b78;
+    property<length> offset_per_nest: 10px;
 
     VerticalLayout{
         alignment: start;
         for song[i] in song_names: HorizontalBox{
+            x: offset_per_nest*song.nest_level;
             alignment: start;
             Text{
-                text: song;
+                text: song.name;
                 horizontal-alignment: start;
             }
         }
@@ -23,15 +35,21 @@ component SongQueue inherits Rectangle{
     
 }
 
-component PlayerControls inherits VerticalBox{
-    // Album cover.
-    Image{
-
-    }
+component PlayerControls inherits Rectangle{
+    property<length> icon_size: 50px;
+    min-height: icon_size;
+    max-height: icon_size;
+    min-width: 2*icon_size;
+    max-width: 2*icon_size;
     // Control buttons.
     HorizontalBox {
+        alignment: center;
         Image{
             source: @image-url("playbutton.svg");
+            colorize: #fbb5fb;
+        }
+        Image{
+            source: @image-url("skipbutton.svg");
             colorize: #fbb5fb;
         }
     }
@@ -39,17 +57,26 @@ component PlayerControls inherits VerticalBox{
 
 // Component that displays when a playlist is being played currently.
 component PlayingMenu inherits Rectangle{
-    in property <[string]> song_names;
+    in property<[SongOrFolder]> song_names: [
+        {name: "examplesong1", nest_level: 0}, 
+        {name: "examplesong2", nest_level: 1}, 
+        {name: "examplesong3", nest_level: 2}, 
+        {name: "examplesong4", nest_level: 0}];
     HorizontalBox {
         alignment: stretch;
 
         VerticalBox {
             width: 50%;
+            // Album cover.
+            Image{
+                height: 30%;
+            }
+            // Skip/play/etc.
             PlayerControls {
 
             }
             SongQueue{
-
+                song_names: song_names;
             }
         }
         
@@ -114,8 +141,8 @@ component PlaylistSelect inherits Rectangle{
 enum ScreenState{ select, playing, editing}
 export component AppWindow inherits Window {
     callback play_playlist(string);
-    maximized: true;
     title: "Gelsemium Music Player";
+    default-font-family: "League Mono";
 
     property <ScreenState> state: select;
     if state == ScreenState.select: PlaylistSelect{
