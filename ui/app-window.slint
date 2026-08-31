@@ -1,5 +1,5 @@
 import { Button, VerticalBox, TextEdit, HorizontalBox } from "std-widgets.slint";
-import "./LeagueMono-VF.ttf";
+// import "./LeagueMono-VF.ttf";
 
 // All songs in the library.
 component SongLibrary inherits Rectangle{
@@ -49,7 +49,7 @@ component PlayerControls inherits Rectangle{
             colorize: #fbb5fb;
         }
         Image{
-            source: @image-url("skipbutton.svg");
+            // source: @image-url("skipbutton.svg");
             colorize: #fbb5fb;
         }
     }
@@ -147,7 +147,7 @@ export component AppWindow inherits Window {
     in property <[string]> playlist_names: ["Example Playlist", "Example Playlist 2.0"];
     property <[SongOrFolder]> songs_for_selected;
     title: "Gelsemium Music Player";
-    default-font-family: "League Mono";
+    // default-font-family: "League Mono";
 
     property <ScreenState> state: select;
     if state == ScreenState.select: PlaylistSelect{

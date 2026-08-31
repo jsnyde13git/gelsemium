@@ -136,6 +136,18 @@ fn read_playlists() -> Result<HashMap<String, Vec<String>>, Box<dyn Error>>{
     Ok(playlists)
 }
 
+
+// Total song data.
+struct Song{
+    path: PathBuf
+}
+
+// Slint-compatible song data.
+struct SongSlint{
+    name: SharedString,
+    nest_level: i32,
+}
+
 struct SongQueue{
     immediate: VecDeque<(u8, PathBuf)>,
     back: VecDeque<(u8, PathBuf)>,
@@ -174,6 +186,14 @@ impl Model for SongQueue{
     }
 
     fn row_data(&self, row: usize) -> Option<Self::Data>{
+        if row < self.immediate.len(){
+            return self.immediate.get(row).map(|(nesting, path)| SongOrFolder{nest_level: *nesting as int, name: "a".to_string().into()});
+        }
+        let row_in_back = row - self.immediate.len();
+        if row_in_back < self.back.len(){
+            return self.immediate.get(row_in_back);
+        }
+        return None;
         todo!()
     }
 
