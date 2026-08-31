@@ -1,5 +1,6 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::env;
+use std::error::Error;
 use std::path::{PathBuf};
 use std::process::exit;
 use std::sync::{Arc, Condvar, Mutex};
@@ -7,8 +8,9 @@ use std::{fs::File};
 use std::io::{self, BufReader};
 use std::iter::Iterator;
 use rodio::{Decoder, Source};
+use slint::Model;
 
-use rust_music_player::playlist_parser::parse_playlists;
+use rust_music_player::playlist_parser::{PlaylistParseError, parse_playlists};
 use rust_music_player::playlist_parser::get_playlist_filepaths;
 
 slint::include_modules!();
@@ -25,18 +27,9 @@ fn main() {
     }
     match command_maybe{
         Some(s) if s == "play" => {
-            // Read playlists.
-            let playlist_file = get_playlists_file();
-            let playlist_file_contents_maybe = std::fs::read_to_string(playlist_file);
-            if let Err(err) = playlist_file_contents_maybe{
-                eprintln!("Error reading file: {err:?}");
-                exit(1);
-            }
-            let playlist_file_contents = playlist_file_contents_maybe.unwrap();
-
-            let playlists_maybe = parse_playlists(&playlist_file_contents);
+            let playlists_maybe = read_playlists();
             if let Err(err) = playlists_maybe{
-                eprintln!("Error reading playlists: {err:?}");
+                eprintln!("Error reading playlists: {err}");
                 exit(1);
             }
             let playlists = playlists_maybe.unwrap();
@@ -86,10 +79,61 @@ fn main() {
             // slint::invoke_from_event_loop(move || {
             //     maximize_ptr.unwrap().window().set_maximized(true); println!("maximized")
             // }).unwrap();
+
+            let playlists_maybe = read_playlists();
+            if let Err(err) = playlists_maybe{
+                eprintln!("Error reading playlists: {err}");
+                exit(1);
+            }
+            let playlists = playlists_maybe.unwrap();
+            // We could refactor this to make it more optimized.
+            // The cloning is probably difficult to remove (the UI and backend both need access),
+            // but we could remove the .keys and instead have playlists directly return names.
+            // If load times become an issue that's an idea, but it's not worth it right now.
+            let playlist_names  = 
+                slint::ModelRc::new(
+                slint::VecModel::from(
+                        playlists.keys().map(|k| k.clone().into()).collect::<Vec<slint::SharedString>>()
+            ));
+            ui.set_playlist_names(playlist_names);
+
+            let playlists_mutex = Arc::new(Mutex::new(playlists));
+            let playlists_copy_for_get_song_list = playlists_mutex.clone();
+            ui.on_get_playlist_song_list(move |name| 
+                {
+                    let lock = playlists_copy_for_get_song_list
+                        .lock()
+                        .unwrap();
+                    let filepaths_initial = lock
+                        .get(name.as_str())
+                        .expect("ERROR: Playlist requested does not exist");
+                    let (filepaths_final, errs) = get_playlist_filepaths(filepaths_initial);
+                    for err in errs{
+                        eprintln!("Error accessing file/folder: {err}");
+                    }
+                    return slint::ModelRc::new(slint::VecModel::from(
+                        filepaths_final.into_iter().map(|(level, path)| SongOrFolder{nest_level: level as i32, name: path.as_os_str().to_str().unwrap().to_owned().into()}).collect::<Vec<SongOrFolder>>()
+                    ));
+                }
+            );
             ui.run().expect("Something failed when starting the UI");
         }
         _ => eprintln!("Unrecognized command")
     }
+}
+
+fn read_playlists() -> Result<HashMap<String, Vec<String>>, Box<dyn Error>>{
+    // Read playlists.
+    let playlist_file = get_playlists_file();
+    let playlist_file_contents = std::fs::read_to_string(playlist_file)?;
+    // if let Err(err) = playlist_file_contents_maybe{
+    //     eprintln!("Error reading file: {err:?}");
+    //     exit(1);
+    // }
+    // let playlist_file_contents = playlist_file_contents_maybe.unwrap();
+
+    let playlists = parse_playlists(&playlist_file_contents)?;
+    Ok(playlists)
 }
 
 struct SongQueue{
@@ -119,6 +163,22 @@ impl SongQueue{
 
     fn queue_immediate(&mut self, item: PathBuf){
         self.immediate.push_back((0, item));
+    }
+}
+
+// TODO
+impl Model for SongQueue{
+    type Data = SongOrFolder;
+    fn row_count(&self) -> usize{
+        self.immediate.len() + self.back.len()
+    }
+
+    fn row_data(&self, row: usize) -> Option<Self::Data>{
+        todo!()
+    }
+
+    fn model_tracker(&self) -> &dyn slint::ModelTracker{
+        todo!()
     }
 }
 

@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::iter::{Iterator, Peekable};
+use std::error::Error;
 use std::path::PathBuf;
 use std::io;
 
@@ -120,6 +122,18 @@ fn parse_playlist_song(playlist_iter: &mut Peekable<impl Iterator<Item = (usize,
 #[derive(Debug)]
 pub enum PlaylistParseError{
     UnclosedBracket{line: usize, col: usize}
+}
+
+impl Error for PlaylistParseError{}
+
+impl Display for PlaylistParseError{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self{
+            Self::UnclosedBracket { line, col } => {
+                write!(f, "Parse Error: Unclosed bracket at line {line}, col {col}")
+            }
+        }
+    }
 }
 
 
