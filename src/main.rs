@@ -3,12 +3,13 @@ use std::env;
 use std::error::Error;
 use std::path::{PathBuf};
 use std::process::exit;
+use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex};
 use std::{fs::File};
 use std::io::{self, BufReader};
 use std::iter::Iterator;
 use rodio::{Decoder, Source};
-use slint::Model;
+use slint::{Model, SharedString, ModelRc, ModelNotify};
 
 use rust_music_player::playlist_parser::{PlaylistParseError, parse_playlists};
 use rust_music_player::playlist_parser::get_playlist_filepaths;
@@ -65,8 +66,8 @@ fn main() {
             // I plan to revamp the playlist data structure anyway, 
             // so a little clone here is only temporary.
             // xkcd 2730
-            let playlist_paths = playlist.into_iter().map(|x| x.1.clone()).collect::<Vec<PathBuf>>();
-            play_file_list(player, &playlist_paths, command_queue);
+            let playlist_paths = SongQueue::new(playlist.into_iter().map(|x| x.1.clone()).collect::<Vec<PathBuf>>());
+            play_file_list(player, playlist_paths, command_queue);
         },
         None => {
             // Default option. Opens the GUI.
@@ -137,12 +138,20 @@ fn read_playlists() -> Result<HashMap<String, Vec<String>>, Box<dyn Error>>{
 }
 
 struct SongQueue{
-    immediate: VecDeque<(u8, PathBuf)>,
-    back: VecDeque<(u8, PathBuf)>,
+    immediate: VecDeque<PathBuf>,
+    back: VecDeque<PathBuf>,
+    names_model: ModelRc<SharedString>,
+    names_rc: Rc<SongNames>,
+}
+
+struct SongNames{
+    immediate: VecDeque<SharedString>,
+    back: VecDeque<SharedString>,
+    notify: slint::ModelNotify,
 }
 
 impl Iterator for SongQueue{
-    type Item = (u8, PathBuf);
+    type Item = PathBuf;
 
     fn next(&mut self) -> Option<Self::Item>{
         if !self.immediate.is_empty(){
@@ -154,31 +163,69 @@ impl Iterator for SongQueue{
 }
 
 impl SongQueue{
-    fn new(songs: Vec<(u8, PathBuf)>) -> SongQueue{
+    fn new(songs: Vec<PathBuf>) -> SongQueue{
+        // Construct the list of song names.
+        // We use lossy conversion from OSString here; 
+        // a malformed song name really isn't a big deal.
+        // (Well, for now anyway. But it's better than a crash.)
+        let inner_names = 
+            songs
+            .iter()
+            .filter_map(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned().into())
+            .collect::<VecDeque<SharedString>>();
+        let names_rc = Rc::new(SongNames{
+            immediate: VecDeque::new(),
+            back: inner_names,
+            notify: ModelNotify::default(),
+        });
+
+        let names_model = ModelRc::from(names_rc.clone());
+
         SongQueue{
             immediate: VecDeque::new(),
             back: VecDeque::from(songs),
+            names_rc: names_rc,
+            names_model: names_model,
         }
     }
 
     fn queue_immediate(&mut self, item: PathBuf){
-        self.immediate.push_back((0, item));
+        self.immediate.push_back(item);
     }
 }
 
-// TODO
-impl Model for SongQueue{
-    type Data = SongOrFolder;
+impl Model for SongNames{
+    type Data = SharedString;
+    
     fn row_count(&self) -> usize{
         self.immediate.len() + self.back.len()
     }
 
     fn row_data(&self, row: usize) -> Option<Self::Data>{
-        todo!()
+        if row < self.immediate.len(){
+            return self.immediate.get(row).cloned();
+        }
+        let row_adj = row - self.immediate.len();
+        if row < self.back.len(){
+            return self.back.get(row).cloned();
+        }
+        return None;
     }
 
     fn model_tracker(&self) -> &dyn slint::ModelTracker{
-        todo!()
+        &self.notify
+    }
+}
+
+impl SongNames{
+    fn pop_front(&mut self){
+        if !self.immediate.is_empty(){
+            self.immediate.pop_front();
+        }else{
+            self.back.pop_front();
+        }
+        self.notify.reset();
     }
 }
 
@@ -283,10 +330,10 @@ fn get_playlists_file() -> String{
 
 
 
-fn play_file_list(player: Arc<rodio::Player>, filepaths: &Vec<PathBuf>, command_queue: Arc<PlayerCommandQueue>){
-    let mut file_iter = filepaths.iter();
+fn play_file_list<T: Iterator<Item = PathBuf>>(player: Arc<rodio::Player>, mut filepaths: T, command_queue: Arc<PlayerCommandQueue>){
+    // let mut file_iter = filepaths.iter();
 
-    while let Some(filepath) = file_iter.next(){
+    while let Some(filepath) = &filepaths.next(){
         // Open file.
         let file_maybe = File::open(filepath);
         if let Err(error) = file_maybe{
