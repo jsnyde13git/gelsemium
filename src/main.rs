@@ -137,6 +137,18 @@ fn read_playlists() -> Result<HashMap<String, Vec<String>>, Box<dyn Error>>{
     Ok(playlists)
 }
 
+
+// Total song data.
+struct Song{
+    path: PathBuf
+}
+
+// Slint-compatible song data.
+struct SongSlint{
+    name: SharedString,
+    nest_level: i32,
+}
+
 struct SongQueue{
     immediate: VecDeque<PathBuf>,
     back: VecDeque<PathBuf>,
