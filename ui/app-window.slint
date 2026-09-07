@@ -1,18 +1,13 @@
 import { Button, VerticalBox, TextEdit, HorizontalBox } from "std-widgets.slint";
 // import "./LeagueMono-VF.ttf";
 
-// All songs in the library.
-component SongLibrary inherits Rectangle{
-    background: #672b78;
-}
-
 struct SongOrFolder{
     name: string,
     nest_level: int,
 }
 
-// Queue of currently-playing songs.
-component SongQueue inherits Rectangle{
+// Display the songs in the library.
+component SongLibrary inherits Rectangle{
     in property<[SongOrFolder]> song_names: [
         {name: "examplesong1", nest_level: 0}, 
         {name: "examplesong2", nest_level: 1}, 
@@ -28,6 +23,29 @@ component SongQueue inherits Rectangle{
             alignment: start;
             Text{
                 text: song.name;
+                horizontal-alignment: start;
+            }
+        }
+    }   
+}
+
+// Queue of currently-playing songs.
+component SongQueue inherits Rectangle{
+    in property<[string]> song_names: [
+         "examplesong1", 
+         "examplesong2", 
+         "examplesong3",
+         "examplesong4",
+    ];
+    background: #672b78;
+    property<length> offset_per_nest: 10px;
+
+    VerticalLayout{
+        alignment: start;
+        for song[i] in song_names: HorizontalBox{
+            alignment: start;
+            Text{
+                text: song;
                 horizontal-alignment: start;
             }
         }
@@ -57,11 +75,12 @@ component PlayerControls inherits Rectangle{
 
 // Component that displays when a playlist is being played currently.
 component PlayingMenu inherits Rectangle{
-    in property<[SongOrFolder]> song_names: [
-        {name: "examplesong1", nest_level: 0}, 
-        {name: "examplesong2", nest_level: 1}, 
-        {name: "examplesong3", nest_level: 2}, 
-        {name: "examplesong4", nest_level: 0}];
+    in property<[string]> song_names: [
+         "examplesong1", 
+         "examplesong2", 
+         "examplesong3",
+         "examplesong4",
+    ];
     callback skip();
     callback pause();
 
@@ -145,7 +164,7 @@ export component AppWindow inherits Window {
     callback get_playlist_song_list(string) -> [SongOrFolder];
 
     in property <[string]> playlist_names: ["Example Playlist", "Example Playlist 2.0"];
-    property <[SongOrFolder]> songs_for_selected;
+    in property <[string]> songs_for_selected;
     title: "Gelsemium Music Player";
     // default-font-family: "League Mono";
 
@@ -154,7 +173,6 @@ export component AppWindow inherits Window {
         playlist_names: playlist_names;
         play_clicked(playlist_name) => {
             state = ScreenState.playing;
-            songs_for_selected = get_playlist_song_list(playlist_name);
             play_playlist(playlist_name);
         };
     }

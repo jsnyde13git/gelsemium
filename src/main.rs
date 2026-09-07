@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::error::Error;
@@ -9,7 +10,7 @@ use std::{fs::File};
 use std::io::{self, BufReader};
 use std::iter::Iterator;
 use rodio::{Decoder, Source};
-use slint::{Model, SharedString, ModelRc, ModelNotify};
+use slint::{Model, SharedString, ModelRc, ModelNotify, Weak};
 
 use rust_music_player::playlist_parser::{PlaylistParseError, parse_playlists};
 use rust_music_player::playlist_parser::get_playlist_filepaths;
@@ -66,13 +67,12 @@ fn main() {
             // I plan to revamp the playlist data structure anyway, 
             // so a little clone here is only temporary.
             // xkcd 2730
-            let playlist_paths = SongQueue::new(playlist.into_iter().map(|x| x.1.clone()).collect::<Vec<PathBuf>>());
-            play_file_list(player, playlist_paths, command_queue);
+            let playlist_paths = SongQueue::new(playlist.into_iter().map(|x| x.1.clone()).collect::<Vec<PathBuf>>(), None);
+            play_file_list(player, playlist_paths.0, command_queue);
         },
         None => {
             // Default option. Opens the GUI.
             let ui = AppWindow::new().unwrap();
-            ui.on_play_playlist(move |playlist_name| println!("{playlist_name}"));
             // attempt at maximization code
             // might be bugged in slint itself?
             // ui.window().set_maximized(true);
@@ -87,6 +87,7 @@ fn main() {
                 exit(1);
             }
             let playlists = playlists_maybe.unwrap();
+
             // We could refactor this to make it more optimized.
             // The cloning is probably difficult to remove (the UI and backend both need access),
             // but we could remove the .keys and instead have playlists directly return names.
@@ -98,7 +99,39 @@ fn main() {
             ));
             ui.set_playlist_names(playlist_names);
 
+
             let playlists_mutex = Arc::new(Mutex::new(playlists));
+            let playlists_copy_for_play_ui = playlists_mutex.clone();
+            let ui_weak_for_play_ui = ui.as_weak();
+
+            let mut handle = rodio::DeviceSinkBuilder::open_default_sink().expect("Opening default audio stream failed");
+            handle.log_on_drop(true);
+            let player = Arc::new(rodio::Player::connect_new(&handle.mixer()));
+            let player_for_on_play = player.clone();
+
+            ui.on_play_playlist(move |playlist_name| {
+                let ui = ui_weak_for_play_ui.unwrap();
+                let playlists = playlists_copy_for_play_ui.lock().unwrap();
+                // If we're at this point, the user clicked a play playlist button.
+                // Given that that button had to exist for the user to click it,
+                // I think it's safe to assume the playlist exists.
+                let playlist_paths = playlists.get(&playlist_name.to_string()).expect("ERROR: Tried to play playlist that didn't exist; this is a bug");
+                let (playlist, errs) = get_playlist_filepaths(playlist_paths);
+                let (song_queue, song_model) = SongQueue::new(playlist.into_iter().map(|x| x.1.clone()).collect::<Vec<PathBuf>>(), Some(ui.as_weak()));
+
+                // Spawn the playing thread.
+                let command_queue = Arc::new(PlayerCommandQueue::new());
+                let command_queue_player = command_queue.clone();
+                let player2 = player_for_on_play.clone();
+                std::thread::spawn(move || play_file_list(player2, song_queue, command_queue_player));
+
+                // Connect the song model to the UI.
+                ui.set_songs_for_selected(song_model); 
+
+                println!("{playlist_name}")
+            });
+
+
             let playlists_copy_for_get_song_list = playlists_mutex.clone();
             ui.on_get_playlist_song_list(move |name| 
                 {
@@ -121,6 +154,12 @@ fn main() {
         }
         _ => eprintln!("Unrecognized command")
     }
+}
+
+fn play_playlist_ui(playlist_name: &SharedString, playlists: HashMap<String, Vec<String>>){
+    // get playlist
+    // expand it into filenames
+    // create songqueue 
 }
 
 fn read_playlists() -> Result<HashMap<String, Vec<String>>, Box<dyn Error>>{
@@ -152,13 +191,14 @@ struct SongSlint{
 struct SongQueue{
     immediate: VecDeque<PathBuf>,
     back: VecDeque<PathBuf>,
-    names_model: ModelRc<SharedString>,
-    names_rc: Rc<SongNames>,
+    // names_model: ModelRc<SharedString>,
+    // names_rc: Rc<SongNames>,
+    names_ui: Option<Weak<AppWindow>>,
 }
 
 struct SongNames{
-    immediate: VecDeque<SharedString>,
-    back: VecDeque<SharedString>,
+    immediate: RefCell<VecDeque<SharedString>>,
+    back: RefCell<VecDeque<SharedString>>,
     notify: slint::ModelNotify,
 }
 
@@ -166,6 +206,24 @@ impl Iterator for SongQueue{
     type Item = PathBuf;
 
     fn next(&mut self) -> Option<Self::Item>{
+        // Pop the first from the song names.
+        // Horrible high-coupling nonsense, but it's the only
+        // way I've found to modify a Slint model from another thread.
+        // Not only that, but *updating* the model didn't work,
+        // so I have to recreate it every time, with a mountain of clone() calls.
+        if let Some(ui) = &self.names_ui{
+            let (immediate, back) = self.new_model();
+            let _ = ui.upgrade_in_event_loop(move |ui| {
+                // I tried doing the downcast thing, but ui.get_songs_for_selected() 
+                // didn't want to downcast into SongNames, so it didn't really work.
+                ui.set_songs_for_selected(ModelRc::new(Rc::new(SongNames{
+                    immediate: immediate,
+                    back: back,
+                    notify: ModelNotify::default(),
+                })));
+            });
+        }
+
         if !self.immediate.is_empty(){
             return self.immediate.pop_front();
         }else{
@@ -175,7 +233,7 @@ impl Iterator for SongQueue{
 }
 
 impl SongQueue{
-    fn new(songs: Vec<PathBuf>) -> SongQueue{
+    fn new(songs: Vec<PathBuf>, ui_weak: Option<Weak<AppWindow>>) -> (SongQueue, ModelRc<SharedString>){
         // Construct the list of song names.
         // We use lossy conversion from OSString here; 
         // a malformed song name really isn't a big deal.
@@ -187,19 +245,29 @@ impl SongQueue{
             .map(|name| name.to_string_lossy().into_owned().into())
             .collect::<VecDeque<SharedString>>();
         let names_rc = Rc::new(SongNames{
-            immediate: VecDeque::new(),
-            back: inner_names,
+            immediate: RefCell::new(VecDeque::new()),
+            back: RefCell::new(inner_names),
             notify: ModelNotify::default(),
         });
 
         let names_model = ModelRc::from(names_rc.clone());
 
-        SongQueue{
+        (SongQueue{
             immediate: VecDeque::new(),
             back: VecDeque::from(songs),
-            names_rc: names_rc,
-            names_model: names_model,
-        }
+            names_ui: ui_weak,
+        }, names_model)
+    }
+
+    fn new_model(&self) -> (RefCell<VecDeque<SharedString>>, RefCell<VecDeque<SharedString>>){
+        let inner_names = 
+            self.immediate.iter().chain(self.back.iter())
+            .filter_map(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned().into())
+            .collect::<VecDeque<SharedString>>();
+        
+            (RefCell::new(VecDeque::new()),
+            RefCell::new(inner_names))
     }
 
     fn queue_immediate(&mut self, item: PathBuf){
@@ -211,16 +279,16 @@ impl Model for SongNames{
     type Data = SharedString;
     
     fn row_count(&self) -> usize{
-        self.immediate.len() + self.back.len()
+        self.immediate.borrow().len() + self.back.borrow().len()
     }
 
     fn row_data(&self, row: usize) -> Option<Self::Data>{
-        if row < self.immediate.len(){
-            return self.immediate.get(row).cloned();
+        if row < self.immediate.borrow().len(){
+            return self.immediate.borrow().get(row).cloned();
         }
-        let row_adj = row - self.immediate.len();
-        if row < self.back.len(){
-            return self.back.get(row).cloned();
+        let row_adj = row - self.immediate.borrow().len();
+        if row_adj < self.back.borrow().len(){
+            return self.back.borrow().get(row_adj).cloned();
         }
         return None;
     }
@@ -231,11 +299,13 @@ impl Model for SongNames{
 }
 
 impl SongNames{
-    fn pop_front(&mut self){
-        if !self.immediate.is_empty(){
-            self.immediate.pop_front();
+    // Interior mutability
+    fn pop_front(&self){
+        println!("songnames called");
+        if !self.immediate.borrow().is_empty(){
+            self.immediate.borrow_mut().pop_front();
         }else{
-            self.back.pop_front();
+            self.back.borrow_mut().pop_front();
         }
         self.notify.reset();
     }
