@@ -59,16 +59,32 @@ component PlayerControls inherits Rectangle{
     max-height: icon_size;
     min-width: 2*icon_size;
     max-width: 2*icon_size;
+
+    callback pause();
+    callback skip();
+
+    property<bool> paused: false;
+
     // Control buttons.
     HorizontalBox {
         alignment: center;
         Image{
-            source: @image-url("playbutton.svg");
+            source: paused ? @image-url("pausebutton.svg") 
+                           : @image-url("playbutton.svg");
             colorize: #fbb5fb;
+            TouchArea{
+                clicked => {
+                    paused = !paused;
+                    pause()
+                };
+            }
         }
         Image{
-            // source: @image-url("skipbutton.svg");
+            source: @image-url("skipbutton.svg");
             colorize: #fbb5fb;
+            TouchArea{
+                clicked => skip();
+            }
         }
     }
 }
@@ -95,7 +111,8 @@ component PlayingMenu inherits Rectangle{
             }
             // Skip/play/etc.
             PlayerControls {
-
+                skip => skip();
+                pause => pause();
             }
             SongQueue{
                 song_names: song_names;
@@ -159,14 +176,24 @@ component PlaylistSelect inherits Rectangle{
 
 enum ScreenState{ select, playing, editing}
 export component AppWindow inherits Window {
+    // For the PlayingMenu state.
     callback play_playlist(string);
-
-    callback get_playlist_song_list(string) -> [SongOrFolder];
-
-    in property <[string]> playlist_names: ["Example Playlist", "Example Playlist 2.0"];
+    callback pause();
+    callback volume_up();
+    callback volume_down();
+    callback skip();
     in property <[string]> songs_for_selected;
+
+    // callback get_playlist_song_list(string) -> [SongOrFolder];
+
+    // For the PlaylistSelect state.
+    in property <[string]> playlist_names: ["Example Playlist", "Example Playlist 2.0"];
+
+    // For the PlaylistEdit state.
+
+    // General properties.
     title: "Gelsemium Music Player";
-    // default-font-family: "League Mono";
+    default-font-family: "League Mono";
 
     property <ScreenState> state: select;
     if state == ScreenState.select: PlaylistSelect{
@@ -178,6 +205,8 @@ export component AppWindow inherits Window {
     }
     if state == ScreenState.playing: PlayingMenu{
         song_names: songs_for_selected;
+        skip => skip();
+        pause => pause();
     }
     
 }

@@ -29,131 +29,160 @@ fn main() {
     }
     match command_maybe{
         Some(s) if s == "play" => {
-            let playlists_maybe = read_playlists();
-            if let Err(err) = playlists_maybe{
-                eprintln!("Error reading playlists: {err}");
-                exit(1);
-            }
-            let playlists = playlists_maybe.unwrap();
-
-            // Parse CLI args into a playlist name and access it.
+            // Play from the CLI.
             let playlist_name = args.collect::<Vec<String>>().join(" ");
-            let playlist_filepaths_maybe = playlists.get(playlist_name.trim());
-            if let None = playlist_filepaths_maybe{
-                eprintln!("No playlist with that name found.");
-                exit(1);
-            }
-            let playlist_filepaths = playlist_filepaths_maybe.unwrap();
-
-            // Expand filepaths into a full list.
-            let (playlist, errs) = get_playlist_filepaths(playlist_filepaths);
-            for err in errs{
-                eprintln!("Error: {err:?}");
-            }
-
-            // Play playlist.
-            println!("Playing playlist {playlist_name}");
-            let mut handle = rodio::DeviceSinkBuilder::open_default_sink().expect("Opening default audio stream failed");
-            handle.log_on_drop(false);
-            let player = Arc::new(rodio::Player::connect_new(&handle.mixer()));
-            let command_queue = Arc::new(PlayerCommandQueue::new());
-            let command_queue_cli_listener = command_queue.clone();
-            std::thread::spawn(move || listen_for_cli_controls(&command_queue_cli_listener));
-            println!("Controls:");
-            println!("s: Skip");
-            println!("d/e: Volume down/up");
-            println!("p: Pause/Play");
-            // TODO: Remove this clone.
-            // I plan to revamp the playlist data structure anyway, 
-            // so a little clone here is only temporary.
-            // xkcd 2730
-            let playlist_paths = SongQueue::new(playlist.into_iter().map(|x| x.1.clone()).collect::<Vec<PathBuf>>(), None);
-            play_file_list(player, playlist_paths.0, command_queue);
+            play_cli(playlist_name);
         },
         None => {
             // Default option. Opens the GUI.
-            let ui = AppWindow::new().unwrap();
-            // attempt at maximization code
-            // might be bugged in slint itself?
-            // ui.window().set_maximized(true);
-            // let maximize_ptr = ui.as_weak();
-            // slint::invoke_from_event_loop(move || {
-            //     maximize_ptr.unwrap().window().set_maximized(true); println!("maximized")
-            // }).unwrap();
-
-            let playlists_maybe = read_playlists();
-            if let Err(err) = playlists_maybe{
-                eprintln!("Error reading playlists: {err}");
-                exit(1);
-            }
-            let playlists = playlists_maybe.unwrap();
-
-            // We could refactor this to make it more optimized.
-            // The cloning is probably difficult to remove (the UI and backend both need access),
-            // but we could remove the .keys and instead have playlists directly return names.
-            // If load times become an issue that's an idea, but it's not worth it right now.
-            let playlist_names  = 
-                slint::ModelRc::new(
-                slint::VecModel::from(
-                        playlists.keys().map(|k| k.clone().into()).collect::<Vec<slint::SharedString>>()
-            ));
-            ui.set_playlist_names(playlist_names);
-
-
-            let playlists_mutex = Arc::new(Mutex::new(playlists));
-            let playlists_copy_for_play_ui = playlists_mutex.clone();
-            let ui_weak_for_play_ui = ui.as_weak();
-
-            let mut handle = rodio::DeviceSinkBuilder::open_default_sink().expect("Opening default audio stream failed");
-            handle.log_on_drop(true);
-            let player = Arc::new(rodio::Player::connect_new(&handle.mixer()));
-            let player_for_on_play = player.clone();
-
-            ui.on_play_playlist(move |playlist_name| {
-                let ui = ui_weak_for_play_ui.unwrap();
-                let playlists = playlists_copy_for_play_ui.lock().unwrap();
-                // If we're at this point, the user clicked a play playlist button.
-                // Given that that button had to exist for the user to click it,
-                // I think it's safe to assume the playlist exists.
-                let playlist_paths = playlists.get(&playlist_name.to_string()).expect("ERROR: Tried to play playlist that didn't exist; this is a bug");
-                let (playlist, errs) = get_playlist_filepaths(playlist_paths);
-                let (song_queue, song_model) = SongQueue::new(playlist.into_iter().map(|x| x.1.clone()).collect::<Vec<PathBuf>>(), Some(ui.as_weak()));
-
-                // Spawn the playing thread.
-                let command_queue = Arc::new(PlayerCommandQueue::new());
-                let command_queue_player = command_queue.clone();
-                let player2 = player_for_on_play.clone();
-                std::thread::spawn(move || play_file_list(player2, song_queue, command_queue_player));
-
-                // Connect the song model to the UI.
-                ui.set_songs_for_selected(song_model); 
-
-                println!("{playlist_name}")
-            });
-
-
-            let playlists_copy_for_get_song_list = playlists_mutex.clone();
-            ui.on_get_playlist_song_list(move |name| 
-                {
-                    let lock = playlists_copy_for_get_song_list
-                        .lock()
-                        .unwrap();
-                    let filepaths_initial = lock
-                        .get(name.as_str())
-                        .expect("ERROR: Playlist requested does not exist");
-                    let (filepaths_final, errs) = get_playlist_filepaths(filepaths_initial);
-                    for err in errs{
-                        eprintln!("Error accessing file/folder: {err}");
-                    }
-                    return slint::ModelRc::new(slint::VecModel::from(
-                        filepaths_final.into_iter().map(|(level, path)| SongOrFolder{nest_level: level as i32, name: path.as_os_str().to_str().unwrap().to_owned().into()}).collect::<Vec<SongOrFolder>>()
-                    ));
-                }
-            );
-            ui.run().expect("Something failed when starting the UI");
+            play_gui();
         }
         _ => eprintln!("Unrecognized command")
     }
+}
+
+fn play_cli(playlist_name: String){
+    let playlists_maybe = read_playlists();
+    if let Err(err) = playlists_maybe{
+        eprintln!("Error reading playlists: {err}");
+        exit(1);
+    }
+    let playlists = playlists_maybe.unwrap();
+
+    // Parse CLI args into a playlist name and access it.
+    let playlist_filepaths_maybe = playlists.get(playlist_name.trim());
+    if let None = playlist_filepaths_maybe{
+        eprintln!("No playlist with that name found.");
+        exit(1);
+    }
+    let playlist_filepaths = playlist_filepaths_maybe.unwrap();
+
+    // Expand filepaths into a full list.
+    let (playlist, errs) = get_playlist_filepaths(playlist_filepaths);
+    for err in errs{
+        eprintln!("Error: {err:?}");
+    }
+
+    // Play playlist.
+    println!("Playing playlist {playlist_name}");
+    let mut handle = rodio::DeviceSinkBuilder::open_default_sink().expect("Opening default audio stream failed");
+    handle.log_on_drop(false);
+    let player = Arc::new(rodio::Player::connect_new(&handle.mixer()));
+    let command_queue = Arc::new(PlayerCommandQueue::new());
+    let command_queue_cli_listener = command_queue.clone();
+    std::thread::spawn(move || listen_for_cli_controls(&command_queue_cli_listener));
+    println!("Controls:");
+    println!("s: Skip");
+    println!("d/e: Volume down/up");
+    println!("p: Pause/Play");
+
+    let playlist_paths = SongQueue::new(playlist.into_iter().map(|x| x.1).collect::<Vec<PathBuf>>(), None);
+    play_file_list(player, playlist_paths.0, command_queue);
+}
+
+fn play_gui(){
+    let ui = AppWindow::new().unwrap();
+    // attempt at maximization code
+    // might be bugged in slint itself?
+    // ui.window().set_maximized(true);
+    // let maximize_ptr = ui.as_weak();
+    // slint::invoke_from_event_loop(move || {
+    //     maximize_ptr.unwrap().window().set_maximized(true); println!("maximized")
+    // }).unwrap();
+
+    let playlists_maybe = read_playlists();
+    if let Err(err) = playlists_maybe{
+        eprintln!("Error reading playlists: {err}");
+        exit(1);
+    }
+    let playlists = playlists_maybe.unwrap();
+
+    // We could refactor this to make it more optimized.
+    // The cloning is probably difficult to remove (the UI and backend both need access),
+    // but we could remove the .keys and instead have playlists directly return names.
+    // If load times become an issue that's an idea, but it's not worth it right now.
+    let playlist_names  = 
+        slint::ModelRc::new(
+        slint::VecModel::from(
+                playlists.keys().map(|k| k.clone().into()).collect::<Vec<slint::SharedString>>()
+    ));
+    ui.set_playlist_names(playlist_names);
+
+
+    let playlists_mutex = Arc::new(Mutex::new(playlists));
+    let playlists_copy_for_play_ui = playlists_mutex.clone();
+    let ui_weak_for_play_ui = ui.as_weak();
+
+    let mut handle = rodio::DeviceSinkBuilder::open_default_sink().expect("Opening default audio stream failed");
+    handle.log_on_drop(true);
+    let player = Arc::new(rodio::Player::connect_new(&handle.mixer()));
+    let player_for_on_play = player.clone();
+
+    ui.on_play_playlist(move |playlist_name| {
+        let ui = ui_weak_for_play_ui.unwrap();
+        let playlists = playlists_copy_for_play_ui.lock().unwrap();
+        // If we're at this point, the user clicked a play playlist button.
+        // Given that that button had to exist for the user to click it,
+        // I think it's safe to assume the playlist exists.
+        let playlist_paths = playlists.get(&playlist_name.to_string()).expect("ERROR: Tried to play playlist that didn't exist; this is a bug");
+        let (playlist, errs) = get_playlist_filepaths(playlist_paths);
+        let (song_queue, song_model) = SongQueue::new(playlist.into_iter().map(|x| x.1.clone()).collect::<Vec<PathBuf>>(), Some(ui.as_weak()));
+
+        // Spawn the playing thread.
+        let command_queue = Arc::new(PlayerCommandQueue::new());
+        let command_queue_player = command_queue.clone();
+        let player2 = player_for_on_play.clone();
+        std::thread::spawn(move || play_file_list(player2, song_queue, command_queue_player));
+
+        // Connect the song model to the UI.
+        ui.set_songs_for_selected(song_model); 
+
+        // Connect the command queue to the UI.
+        let cqueue = command_queue.clone();
+        ui.on_pause(move || cqueue.add_command(PlayerCommand::Pause));
+        let cqueue = command_queue.clone();
+        ui.on_skip(move || cqueue.add_command(PlayerCommand::Skip));
+        let cqueue = command_queue.clone();
+        ui.on_volume_up(move || cqueue.add_command(PlayerCommand::VolumeUp));
+        let cqueue = command_queue.clone();
+        ui.on_volume_down(move || cqueue.add_command(PlayerCommand::VolumeDown));
+
+        println!("{playlist_name}")
+    });
+
+
+    // let playlists_copy_for_get_song_list = playlists_mutex.clone();
+    // ui.on_get_playlist_song_list(move |name| 
+    //     {
+    //         let lock = playlists_copy_for_get_song_list
+    //             .lock()
+    //             .unwrap();
+    //         let filepaths_initial = lock
+    //             .get(name.as_str())
+    //             .expect("ERROR: Playlist requested does not exist");
+    //         let (filepaths_final, errs) = get_playlist_filepaths(filepaths_initial);
+    //         for err in errs{
+    //             eprintln!("Error accessing file/folder: {err}");
+    //         }
+    //         return slint::ModelRc::new(slint::VecModel::from(
+    //             filepaths_final.into_iter().map(|(level, path)| SongOrFolder{nest_level: level as i32, name: path.as_os_str().to_str().unwrap().to_owned().into()}).collect::<Vec<SongOrFolder>>()
+    //         ));
+    //     }
+    // );
+    ui.run().expect("Something failed when starting the UI");
+}
+
+
+/// Slint-compatible element for the Song Library.
+/// Can be either a folder or a song.
+/// Normally in Rust we'd represent that with a sum type,
+/// but Slint doesn't have those. So bool it is. 
+/// They have the same fields anyway.
+struct LibraryElem{
+    nest_level: i32,
+    path: SharedString,
+    name: SharedString,
+    is_folder: bool,
 }
 
 fn play_playlist_ui(playlist_name: &SharedString, playlists: HashMap<String, Vec<String>>){
@@ -174,18 +203,6 @@ fn read_playlists() -> Result<HashMap<String, Vec<String>>, Box<dyn Error>>{
 
     let playlists = parse_playlists(&playlist_file_contents)?;
     Ok(playlists)
-}
-
-
-// Total song data.
-struct Song{
-    path: PathBuf
-}
-
-// Slint-compatible song data.
-struct SongSlint{
-    name: SharedString,
-    nest_level: i32,
 }
 
 struct SongQueue{
