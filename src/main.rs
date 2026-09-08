@@ -42,12 +42,19 @@ fn main() {
 }
 
 fn play_cli(playlist_name: String){
-    let playlists_maybe = read_playlists();
-    if let Err(err) = playlists_maybe{
-        eprintln!("Error reading playlists: {err}");
-        exit(1);
-    }
-    let playlists = playlists_maybe.unwrap();
+    // let playlists_maybe = read_playlists();
+    // if let Err(err) = playlists_maybe{
+    //     eprintln!("Error reading playlists: {err}");
+    //     exit(1);
+    // }
+    // let playlists = playlists_maybe.unwrap();
+    let playlists = match read_playlists(){
+        Ok(p) => p,
+        Err(err) => {
+            eprintln!("Error reading playlists: {err}");
+            exit(1);
+        }
+    };
 
     // Parse CLI args into a playlist name and access it.
     let playlist_filepaths_maybe = playlists.get(playlist_name.trim());
@@ -183,12 +190,6 @@ struct LibraryElem{
     path: SharedString,
     name: SharedString,
     is_folder: bool,
-}
-
-fn play_playlist_ui(playlist_name: &SharedString, playlists: HashMap<String, Vec<String>>){
-    // get playlist
-    // expand it into filenames
-    // create songqueue 
 }
 
 fn read_playlists() -> Result<HashMap<String, Vec<String>>, Box<dyn Error>>{
@@ -428,26 +429,32 @@ fn get_playlists_file() -> String{
 }
 
 
-
+// Allowed because it triggers on the Arcs, which while *technically* don't
+// need to be passed by reference, I don't think there's really a lot of
+// benefit to changing it.
+#[allow(clippy::needless_pass_by_value)]
 fn play_file_list<T: Iterator<Item = PathBuf>>(player: Arc<rodio::Player>, mut filepaths: T, command_queue: Arc<PlayerCommandQueue>){
     // let mut file_iter = filepaths.iter();
 
     while let Some(filepath) = &filepaths.next(){
         // Open file.
-        let file_maybe = File::open(filepath);
-        if let Err(error) = file_maybe{
-            println!("Error reading file {}: {error}", filepath.display());
-            continue;
-        }
-        let file = BufReader::new(file_maybe.unwrap());
+        // Either open file as a BufReader, or skip to the next one if it fails.
+        let file = match File::open(filepath){
+            Ok(f) => BufReader::new(f),
+            Err(err) => {
+                eprintln!("Error reading file {}: {err}", filepath.display());
+                continue;
+            }
+        };
 
         // Try to get an audio source from that file
-        let source_maybe = Decoder::try_from(file);
-        if let Err(error) = source_maybe{
-            println!("Error reading file {}: {error}", filepath.display());
-            continue;
-        }
-        let source = source_maybe.unwrap();
+        let source = match Decoder::try_from(file){
+            Ok(s) => s,
+            Err(err) => {
+                eprintln!("Error reading file {}: {err}", filepath.display());
+                continue;
+            }
+        };
 
         // Play file
         println!("Playing {}", filepath.display());
@@ -486,7 +493,7 @@ fn play_file_list<T: Iterator<Item = PathBuf>>(player: Arc<rodio::Player>, mut f
 }
 
 /// Meant to run in a separate thread.
-/// Will push a PlayerCommand::SongFinished update when done.
+/// Will push a `PlayerCommand::SongFinished` update when done.
 fn play_source<T: Source + Send + 'static>(player: &rodio::Player, source: T, command_queue: &PlayerCommandQueue){
     player.append(source);
     player.sleep_until_end();
