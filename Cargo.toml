@@ -12,9 +12,7 @@ slint-build = "1.17.1"
 
 [lints.clippy]
 pedantic = "warn"
-unwrap_used = {level = "warn", allow-unwrap-types = ["std::sync::LockResult"]}
-#allow_unwrap_types = ["std::sync::LockResult"]
+unwrap_used = "warn"
 expect_used = "warn"
 indexing_slicing = "warn"
 string_slice = "warn"
-
