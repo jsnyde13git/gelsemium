@@ -10,12 +10,11 @@ use std::{fs::File};
 use std::io::{self, BufReader};
 use std::iter::Iterator;
 use rodio::{Decoder, Source};
-use slint::{Model, SharedString, ModelRc, ModelNotify, Weak};
+use slint::{ComponentHandle, Model, ModelNotify, ModelRc, SharedString, Weak};
 
-use rust_music_player::playlist_parser::{PlaylistParseError, parse_playlists};
+use rust_music_player::playlist_parser::{parse_playlists};
 use rust_music_player::playlist_parser::get_playlist_filepaths;
-
-slint::include_modules!();
+use rust_music_player::ui::{AppWindow};
 
 fn main() {
     // Take all non-initial CLI arguments and put them into a string.
@@ -132,7 +131,7 @@ fn play_gui(){
         // Given that that button had to exist for the user to click it,
         // I think it's safe to assume the playlist exists.
         let playlist_paths = playlists.get(&playlist_name.to_string()).expect("ERROR: Tried to play playlist that didn't exist; this is a bug");
-        let (playlist, errs) = get_playlist_filepaths(playlist_paths);
+        let (playlist, _) = get_playlist_filepaths(playlist_paths);
         let (song_queue, song_model) = SongQueue::new(playlist.into_iter().map(|x| x.1.clone()).collect::<Vec<PathBuf>>(), Some(ui.as_weak()));
 
         // Spawn the playing thread.
@@ -187,9 +186,14 @@ fn play_gui(){
 /// They have the same fields anyway.
 struct LibraryElem{
     nest_level: i32,
-    path: SharedString,
     name: SharedString,
     is_folder: bool,
+}
+
+struct Library{
+    paths: Vec<PathBuf>,
+    model: ModelRc<LibraryElem>,
+    model_inner: Rc<Vec<LibraryElem>>,
 }
 
 fn read_playlists() -> Result<HashMap<String, Vec<String>>, Box<dyn Error>>{
@@ -308,7 +312,7 @@ impl Model for SongNames{
         if row_adj < self.back.borrow().len(){
             return self.back.borrow().get(row_adj).cloned();
         }
-        return None;
+        None
     }
 
     fn model_tracker(&self) -> &dyn slint::ModelTracker{
@@ -358,15 +362,7 @@ impl PlayerCommandQueue{
         self.needs_update.notify_all();
     }
 
-    /// Adds multiple commands.
-    /// Modifies the mutex.
-    fn add_commands(&self, mut cmds: Vec<PlayerCommand>){
-        let mut lock = self.command_list.lock().unwrap();
-        lock.append(&mut cmds);
-        self.needs_update.notify_all();
-    }
-
-    /// Takes the commands, *replacing them with Vec::new()*.
+    /// Takes the commands, *replacing them with `Vec::new()`*.
     /// Modifies the mutex.
     fn take_commands(&self) -> Vec<PlayerCommand>{
         let mut lock = self.command_list.lock().unwrap();
