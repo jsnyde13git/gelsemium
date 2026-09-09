@@ -1,16 +1,14 @@
-use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap};
 use std::env;
 use std::error::Error;
 use std::path::{PathBuf};
 use std::process::exit;
 use std::rc::Rc;
-use std::sync::{Arc, Condvar, Mutex};
-use std::{fs::File};
-use std::io::{self, BufReader};
+use std::sync::{Arc, Mutex};
+use std::io::{self};
 use std::iter::Iterator;
-use rodio::{Decoder, Source};
-use slint::{ComponentHandle, Model, ModelNotify, ModelRc, SharedString, Weak};
+use rodio::Player;
+use slint::{ComponentHandle, ModelRc, PlatformError, SharedString, Weak};
 
 use rust_music_player::playlist_parser::{parse_playlists};
 use rust_music_player::playlist_parser::get_playlist_filepaths;
@@ -35,7 +33,10 @@ fn main() {
         },
         None => {
             // Default option. Opens the GUI.
-            play_gui();
+            let res = play_gui();
+            if let Err(error) = res{
+                eprintln!("Error with the GUI: {error}");
+            }
         }
         _ => eprintln!("Unrecognized command")
     }
@@ -87,8 +88,8 @@ fn play_cli(playlist_name: String){
     play_file_list(player, playlist_paths.0, command_queue);
 }
 
-fn play_gui(){
-    let ui = AppWindow::new().unwrap();
+fn play_gui() -> Result<(), PlatformError>{
+    let ui = AppWindow::new()?;
     // attempt at maximization code
     // might be bugged in slint itself?
     // ui.window().set_maximized(true);
@@ -154,7 +155,7 @@ fn play_gui(){
         let cqueue = command_queue.clone();
         ui.on_volume_down(move || cqueue.add_command(PlayerCommand::VolumeDown));
 
-        println!("{playlist_name}")
+        println!("Playing {playlist_name}")
     });
 
 
@@ -176,7 +177,11 @@ fn play_gui(){
     //         ));
     //     }
     // );
-    ui.run().expect("Something failed when starting the UI");
+    ui.run()
+}
+
+fn ui_on_play_playlist(playlist_name: SharedString, ui: Weak<AppWindow>, playlists: &Mutex<HashMap<String, Vec<String>>>, player: &Player){
+
 }
 
 
@@ -266,9 +271,3 @@ fn get_playlists_file() -> String{
     
     panic!("Unsupported OS. Supported OSes are: Linux");
 }
-
-
-
-
-
-
