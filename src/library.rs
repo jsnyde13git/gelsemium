@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use slint::SharedString;
+use slint::{Model, SharedString};
 
 /// Slint-compatible element for the Song Library.
 /// Can be either a folder or a song.
@@ -19,11 +19,33 @@ struct SlintLibraryElem {
 //     model: ModelRc<LibraryElem>,
 // }
 
+struct Library{
+    contents: LibraryFolder,
+}
+
+impl Model for Library{
+    type Data = SlintLibraryElem;
+
+    fn row_count(&self) -> usize {
+        todo!()
+    }
+
+    fn row_data(&self, row: usize) -> Option<Self::Data> {
+        todo!()
+    }
+
+    fn model_tracker(&self) -> &dyn slint::ModelTracker {
+        todo!()
+    }
+}
+
 struct LibraryFolder{
     // The folders contained in the folder.
     subfolders: Vec<Box<LibraryFolder>>,
     // The songs contained in the folder.
     songs: Vec<LibrarySong>,
+    // The folder's name.
+    name: SharedString,
     // Whether the folder is hidden in the UI.
     hidden: bool,
 }
