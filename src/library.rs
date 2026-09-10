@@ -46,8 +46,16 @@ struct LibraryFolder{
     songs: Vec<LibrarySong>,
     // The folder's name.
     name: SharedString,
+    // Number of child elements (computed recursively). Includes both folders & songs.
+    elements: usize,
     // Whether the folder is hidden in the UI.
     hidden: bool,
+}
+
+impl LibraryFolder{
+    fn get(index: i32) -> Option<LibrarySong>{
+        todo!()
+    }
 }
 
 struct LibrarySong{
