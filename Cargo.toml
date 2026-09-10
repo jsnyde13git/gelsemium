@@ -16,5 +16,8 @@ unwrap_used = "warn"
 expect_used = "warn"
 indexing_slicing = "warn"
 string_slice = "warn"
+panic = "warn"
+panic_in_result_fn = "warn"
+exit = "warn"
 # IMO this lint often makes code *less* readable.
 needless_return = "allow"
