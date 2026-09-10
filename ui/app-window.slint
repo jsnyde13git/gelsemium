@@ -1,18 +1,20 @@
 import { Button, VerticalBox, TextEdit, HorizontalBox } from "std-widgets.slint";
 // import "./LeagueMono-VF.ttf";
 
-struct SongOrFolder{
+struct LibraryElem{
     name: string,
     nest_level: int,
+    is_folder: bool,    
 }
 
 // Display the songs in the library.
 component SongLibrary inherits Rectangle{
-    in property<[SongOrFolder]> song_names: [
-        {name: "examplesong1", nest_level: 0}, 
-        {name: "examplesong2", nest_level: 1}, 
-        {name: "examplesong3", nest_level: 2}, 
-        {name: "examplesong4", nest_level: 0}];
+    in property<[LibraryElem]> song_names: [
+        {name: "folder1", nest_level: 0, is_folder: true}, 
+        {name: "examplesong1", nest_level: 1, is_folder: false}, 
+        {name: "folder2", nest_level: 1, is_folder: true}, 
+        {name: "examplesong3", nest_level: 2, is_folder: false}, 
+        {name: "examplesong4", nest_level: 0, is_folder: false}];
     background: #672b78;
     property<length> offset_per_nest: 10px;
 

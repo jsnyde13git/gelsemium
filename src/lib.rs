@@ -1,7 +1,7 @@
-pub mod playlist_parser;
 pub mod player;
+pub mod playlist_parser;
 
 #[allow(clippy::all)]
-pub mod ui{
+pub mod ui {
     slint::include_modules!();
 }

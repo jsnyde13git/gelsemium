@@ -1,19 +1,19 @@
-use std::collections::{HashMap};
+use rodio::Player;
+use slint::{ComponentHandle, ModelRc, PlatformError, SharedString, VecModel, Weak};
+use std::collections::HashMap;
 use std::env;
 use std::error::Error;
-use std::path::{PathBuf};
+use std::io::{self};
+use std::iter::{Iterator, zip};
+use std::path::PathBuf;
 use std::process::exit;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use std::io::{self};
-use std::iter::Iterator;
-use rodio::Player;
-use slint::{ComponentHandle, ModelRc, PlatformError, SharedString, Weak};
 
-use rust_music_player::playlist_parser::{parse_playlists};
-use rust_music_player::playlist_parser::get_playlist_filepaths;
-use rust_music_player::ui::{AppWindow};
 use rust_music_player::player::{PlayerCommand, PlayerCommandQueue, SongQueue, play_file_list};
+use rust_music_player::playlist_parser::get_playlist_filepaths;
+use rust_music_player::playlist_parser::parse_playlists;
+use rust_music_player::ui::AppWindow;
 
 fn main() {
     // Take all non-initial CLI arguments and put them into a string.
@@ -22,34 +22,34 @@ fn main() {
     // Play it.
     let mut args = env::args().skip(1);
     let command_maybe = args.next();
-    if command_maybe.is_none(){
+    if command_maybe.is_none() {
         eprintln!("No arguments given. Valid arguments are: play <playlistname>");
     }
-    match command_maybe{
+    match command_maybe {
         Some(s) if s == "play" => {
             // Play from the CLI.
             let playlist_name = args.collect::<Vec<String>>().join(" ");
             play_cli(playlist_name);
-        },
+        }
         None => {
             // Default option. Opens the GUI.
             let res = play_gui();
-            if let Err(error) = res{
+            if let Err(error) = res {
                 eprintln!("Error with the GUI: {error}");
             }
         }
-        _ => eprintln!("Unrecognized command")
+        _ => eprintln!("Unrecognized command"),
     }
 }
 
-fn play_cli(playlist_name: String){
+fn play_cli(playlist_name: String) {
     // let playlists_maybe = read_playlists();
     // if let Err(err) = playlists_maybe{
     //     eprintln!("Error reading playlists: {err}");
     //     exit(1);
     // }
     // let playlists = playlists_maybe.unwrap();
-    let playlists = match read_playlists(){
+    let playlists = match read_playlists() {
         Ok(p) => p,
         Err(err) => {
             eprintln!("Error reading playlists: {err}");
@@ -59,7 +59,7 @@ fn play_cli(playlist_name: String){
 
     // Parse CLI args into a playlist name and access it.
     let playlist_filepaths_maybe = playlists.get(playlist_name.trim());
-    if let None = playlist_filepaths_maybe{
+    if let None = playlist_filepaths_maybe {
         eprintln!("No playlist with that name found.");
         exit(1);
     }
@@ -67,13 +67,14 @@ fn play_cli(playlist_name: String){
 
     // Expand filepaths into a full list.
     let (playlist, errs) = get_playlist_filepaths(playlist_filepaths);
-    for err in errs{
+    for err in errs {
         eprintln!("Error: {err:?}");
     }
 
     // Play playlist.
     println!("Playing playlist {playlist_name}");
-    let mut handle = rodio::DeviceSinkBuilder::open_default_sink().expect("Opening default audio stream failed");
+    let mut handle =
+        rodio::DeviceSinkBuilder::open_default_sink().expect("Opening default audio stream failed");
     handle.log_on_drop(false);
     let player = Arc::new(rodio::Player::connect_new(&handle.mixer()));
     let command_queue = Arc::new(PlayerCommandQueue::new());
@@ -84,11 +85,14 @@ fn play_cli(playlist_name: String){
     println!("d/e: Volume down/up");
     println!("p: Pause/Play");
 
-    let playlist_paths = SongQueue::new(playlist.into_iter().map(|x| x.1).collect::<Vec<PathBuf>>(), None);
+    let playlist_paths = SongQueue::new(
+        playlist.into_iter().map(|x| x.1).collect::<Vec<PathBuf>>(),
+        None,
+    );
     play_file_list(player, playlist_paths.0, command_queue);
 }
 
-fn play_gui() -> Result<(), PlatformError>{
+fn play_gui() -> Result<(), PlatformError> {
     let ui = AppWindow::new()?;
     // attempt at maximization code
     // might be bugged in slint itself?
@@ -98,30 +102,40 @@ fn play_gui() -> Result<(), PlatformError>{
     //     maximize_ptr.unwrap().window().set_maximized(true); println!("maximized")
     // }).unwrap();
 
-    let playlists_maybe = read_playlists();
-    if let Err(err) = playlists_maybe{
-        eprintln!("Error reading playlists: {err}");
-        exit(1);
-    }
-    let playlists = playlists_maybe.unwrap();
+    let playlists = match read_playlists() {
+        Ok(p) => p,
+        Err(err) => {
+            eprintln!("Error reading playlists: {err}");
+            exit(1);
+        }
+    };
+
+    let lib_default = Vec::new();
+    let library_initial = playlists.get("Library").unwrap_or(&lib_default);
+    let (library_paths, _) = get_playlist_filepaths(library_initial);
+    let library_paths = library_paths
+        .into_iter()
+        .map(|(depth, path)| (depth as i32, path))
+        .collect::<Vec<(i32, PathBuf)>>();
 
     // We could refactor this to make it more optimized.
     // The cloning is probably difficult to remove (the UI and backend both need access),
     // but we could remove the .keys and instead have playlists directly return names.
     // If load times become an issue that's an idea, but it's not worth it right now.
-    let playlist_names  = 
-        slint::ModelRc::new(
-        slint::VecModel::from(
-                playlists.keys().map(|k| k.clone().into()).collect::<Vec<slint::SharedString>>()
+    let playlist_names = slint::ModelRc::new(slint::VecModel::from(
+        playlists
+            .keys()
+            .map(|k| k.clone().into())
+            .collect::<Vec<slint::SharedString>>(),
     ));
     ui.set_playlist_names(playlist_names);
-
 
     let playlists_mutex = Arc::new(Mutex::new(playlists));
     let playlists_copy_for_play_ui = playlists_mutex.clone();
     let ui_weak_for_play_ui = ui.as_weak();
 
-    let mut handle = rodio::DeviceSinkBuilder::open_default_sink().expect("Opening default audio stream failed");
+    let mut handle =
+        rodio::DeviceSinkBuilder::open_default_sink().expect("Opening default audio stream failed");
     handle.log_on_drop(true);
     let player = Arc::new(rodio::Player::connect_new(&handle.mixer()));
     let player_for_on_play = player.clone();
@@ -135,16 +149,29 @@ fn play_gui() -> Result<(), PlatformError>{
     ui.run()
 }
 
-fn ui_on_play_playlist(playlist_name: SharedString, ui: &Weak<AppWindow>, playlists: &Mutex<HashMap<String, Vec<String>>>, player: &Arc<Player>){
+fn ui_on_play_playlist(
+    playlist_name: SharedString,
+    ui: &Weak<AppWindow>,
+    playlists: &Mutex<HashMap<String, Vec<String>>>,
+    player: &Arc<Player>,
+) {
     let ui = ui.unwrap();
     let playlists = playlists.lock().unwrap();
     // If we're at this point, the user clicked a play playlist button.
     // Given that that button had to exist for the user to click it,
     // I think it's safe to assume the playlist exists.
     #[allow(clippy::unwrap_used)]
-    let playlist_paths = playlists.get(&playlist_name.to_string()).expect("ERROR: Tried to play playlist that didn't exist; this is a bug");
+    let playlist_paths = playlists
+        .get(&playlist_name.to_string())
+        .expect("ERROR: Tried to play playlist that didn't exist; this is a bug");
     let (playlist, _) = get_playlist_filepaths(playlist_paths);
-    let (song_queue, song_model) = SongQueue::new(playlist.into_iter().map(|x| x.1.clone()).collect::<Vec<PathBuf>>(), Some(ui.as_weak()));
+    let (song_queue, song_model) = SongQueue::new(
+        playlist
+            .into_iter()
+            .map(|x| x.1.clone())
+            .collect::<Vec<PathBuf>>(),
+        Some(ui.as_weak()),
+    );
 
     // Spawn the playing thread.
     let command_queue = Arc::new(PlayerCommandQueue::new());
@@ -153,7 +180,7 @@ fn ui_on_play_playlist(playlist_name: SharedString, ui: &Weak<AppWindow>, playli
     std::thread::spawn(move || play_file_list(player2, song_queue, command_queue_player));
 
     // Connect the song model to the UI.
-    ui.set_songs_for_selected(song_model); 
+    ui.set_songs_for_selected(song_model);
 
     // Connect the command queue to the UI.
     let cqueue = command_queue.clone();
@@ -168,31 +195,56 @@ fn ui_on_play_playlist(playlist_name: SharedString, ui: &Weak<AppWindow>, playli
     println!("Playing {playlist_name}")
 }
 
-
 /// Slint-compatible element for the Song Library.
 /// Can be either a folder or a song.
 /// Normally in Rust we'd represent that with a sum type,
-/// but Slint doesn't have those. So bool it is. 
+/// but Slint doesn't have those. So bool it is.
 /// They have the same fields anyway.
-struct LibraryElem{
+#[derive(Clone)]
+struct LibraryElem {
     nest_level: i32,
     name: SharedString,
     is_folder: bool,
 }
 
-struct Library{
+struct Library {
     paths: Vec<PathBuf>,
     model: ModelRc<LibraryElem>,
-    model_inner: Rc<Vec<LibraryElem>>,
 }
 
-impl Library{
-    fn get(&self, index: usize) -> Option<&PathBuf>{
+impl Library {
+    fn new(filepaths: Vec<(i32, PathBuf)>) -> Library {
+        let (nest_levels, paths): (Vec<_>, Vec<_>) = filepaths.into_iter().unzip();
+
+        // construct library elements
+        let library_elems = zip(nest_levels.iter(), paths.iter())
+            .filter_map(|(nest, path)| {
+                if let Some(filename) = path.file_name() {
+                    Some(LibraryElem {
+                        nest_level: *nest,
+                        name: filename.to_string_lossy().into_owned().into(),
+                        is_folder: path.is_dir(),
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<LibraryElem>>();
+        // let library_elems_inner = Rc::new(library_elems);
+        let library_elems_model = ModelRc::new(VecModel::from(library_elems));
+
+        Library{
+            paths,
+            model: library_elems_model,
+        }
+    }
+
+    fn get(&self, index: usize) -> Option<&PathBuf> {
         self.paths.get(index)
     }
 }
 
-fn read_playlists() -> Result<HashMap<String, Vec<String>>, Box<dyn Error>>{
+fn read_playlists() -> Result<HashMap<String, Vec<String>>, Box<dyn Error>> {
     // Read playlists.
     let playlist_file = get_playlists_file();
     let playlist_file_contents = std::fs::read_to_string(playlist_file)?;
@@ -206,19 +258,18 @@ fn read_playlists() -> Result<HashMap<String, Vec<String>>, Box<dyn Error>>{
     Ok(playlists)
 }
 
-
 // Consider: Use raw mode?
 // For now this uses normal mode
-fn listen_for_cli_controls(cmd_queue: &PlayerCommandQueue) -> !{
+fn listen_for_cli_controls(cmd_queue: &PlayerCommandQueue) -> ! {
     let mut buffer = String::new();
-    loop{
+    loop {
         let result = io::stdin().read_line(&mut buffer);
-        if let Err(err) = result{
+        if let Err(err) = result {
             eprintln!("Error reading from stdin: {err}");
             continue;
         }
 
-        match buffer.to_lowercase().trim(){
+        match buffer.to_lowercase().trim() {
             "s" => {
                 // Skip button
                 cmd_queue.add_command(PlayerCommand::Skip);
@@ -235,23 +286,23 @@ fn listen_for_cli_controls(cmd_queue: &PlayerCommandQueue) -> !{
                 // Pause
                 cmd_queue.add_command(PlayerCommand::Pause);
             }
-            c => println!("Unrecognized command {c}")
+            c => println!("Unrecognized command {c}"),
         }
 
         buffer.clear();
     }
 }
 
-fn get_playlists_file() -> String{
+fn get_playlists_file() -> String {
     // Check GELSEMIUM_MUSIC_PLAYER_DIR environment variable
     // If set, use that directory
     // Else check if Windows
     // If set, use <user>/Program Files/Local/GelsemiumMusicPlayer
     // Else check if Linux
     // If set, use ~/.local/share/GelsemiumMusicPlayer
-    if cfg!(target_os = "linux"){
+    if cfg!(target_os = "linux") {
         return "playlists.txt".to_string();
     }
-    
+
     panic!("Unsupported OS. Supported OSes are: Linux");
 }
