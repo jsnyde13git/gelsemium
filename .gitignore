@@ -1,2 +1,4 @@
 /target
 playlists.txt
+flamegraph.svg
+perf.data
