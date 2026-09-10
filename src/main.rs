@@ -127,61 +127,45 @@ fn play_gui() -> Result<(), PlatformError>{
     let player_for_on_play = player.clone();
 
     ui.on_play_playlist(move |playlist_name| {
-        let ui = ui_weak_for_play_ui.unwrap();
-        let playlists = playlists_copy_for_play_ui.lock().unwrap();
-        // If we're at this point, the user clicked a play playlist button.
-        // Given that that button had to exist for the user to click it,
-        // I think it's safe to assume the playlist exists.
-        let playlist_paths = playlists.get(&playlist_name.to_string()).expect("ERROR: Tried to play playlist that didn't exist; this is a bug");
-        let (playlist, _) = get_playlist_filepaths(playlist_paths);
-        let (song_queue, song_model) = SongQueue::new(playlist.into_iter().map(|x| x.1.clone()).collect::<Vec<PathBuf>>(), Some(ui.as_weak()));
-
-        // Spawn the playing thread.
-        let command_queue = Arc::new(PlayerCommandQueue::new());
-        let command_queue_player = command_queue.clone();
-        let player2 = player_for_on_play.clone();
-        std::thread::spawn(move || play_file_list(player2, song_queue, command_queue_player));
-
-        // Connect the song model to the UI.
-        ui.set_songs_for_selected(song_model); 
-
-        // Connect the command queue to the UI.
-        let cqueue = command_queue.clone();
-        ui.on_pause(move || cqueue.add_command(PlayerCommand::Pause));
-        let cqueue = command_queue.clone();
-        ui.on_skip(move || cqueue.add_command(PlayerCommand::Skip));
-        let cqueue = command_queue.clone();
-        ui.on_volume_up(move || cqueue.add_command(PlayerCommand::VolumeUp));
-        let cqueue = command_queue.clone();
-        ui.on_volume_down(move || cqueue.add_command(PlayerCommand::VolumeDown));
-
-        println!("Playing {playlist_name}")
+        let ui = &ui_weak_for_play_ui;
+        let player = &player_for_on_play;
+        ui_on_play_playlist(playlist_name, &ui, &playlists_copy_for_play_ui, &player);
     });
 
-
-    // let playlists_copy_for_get_song_list = playlists_mutex.clone();
-    // ui.on_get_playlist_song_list(move |name| 
-    //     {
-    //         let lock = playlists_copy_for_get_song_list
-    //             .lock()
-    //             .unwrap();
-    //         let filepaths_initial = lock
-    //             .get(name.as_str())
-    //             .expect("ERROR: Playlist requested does not exist");
-    //         let (filepaths_final, errs) = get_playlist_filepaths(filepaths_initial);
-    //         for err in errs{
-    //             eprintln!("Error accessing file/folder: {err}");
-    //         }
-    //         return slint::ModelRc::new(slint::VecModel::from(
-    //             filepaths_final.into_iter().map(|(level, path)| SongOrFolder{nest_level: level as i32, name: path.as_os_str().to_str().unwrap().to_owned().into()}).collect::<Vec<SongOrFolder>>()
-    //         ));
-    //     }
-    // );
     ui.run()
 }
 
-fn ui_on_play_playlist(playlist_name: SharedString, ui: Weak<AppWindow>, playlists: &Mutex<HashMap<String, Vec<String>>>, player: &Player){
+fn ui_on_play_playlist(playlist_name: SharedString, ui: &Weak<AppWindow>, playlists: &Mutex<HashMap<String, Vec<String>>>, player: &Arc<Player>){
+    let ui = ui.unwrap();
+    let playlists = playlists.lock().unwrap();
+    // If we're at this point, the user clicked a play playlist button.
+    // Given that that button had to exist for the user to click it,
+    // I think it's safe to assume the playlist exists.
+    #[allow(clippy::unwrap_used)]
+    let playlist_paths = playlists.get(&playlist_name.to_string()).expect("ERROR: Tried to play playlist that didn't exist; this is a bug");
+    let (playlist, _) = get_playlist_filepaths(playlist_paths);
+    let (song_queue, song_model) = SongQueue::new(playlist.into_iter().map(|x| x.1.clone()).collect::<Vec<PathBuf>>(), Some(ui.as_weak()));
 
+    // Spawn the playing thread.
+    let command_queue = Arc::new(PlayerCommandQueue::new());
+    let command_queue_player = command_queue.clone();
+    let player2 = player.clone();
+    std::thread::spawn(move || play_file_list(player2, song_queue, command_queue_player));
+
+    // Connect the song model to the UI.
+    ui.set_songs_for_selected(song_model); 
+
+    // Connect the command queue to the UI.
+    let cqueue = command_queue.clone();
+    ui.on_pause(move || cqueue.add_command(PlayerCommand::Pause));
+    let cqueue = command_queue.clone();
+    ui.on_skip(move || cqueue.add_command(PlayerCommand::Skip));
+    let cqueue = command_queue.clone();
+    ui.on_volume_up(move || cqueue.add_command(PlayerCommand::VolumeUp));
+    let cqueue = command_queue.clone();
+    ui.on_volume_down(move || cqueue.add_command(PlayerCommand::VolumeDown));
+
+    println!("Playing {playlist_name}")
 }
 
 
