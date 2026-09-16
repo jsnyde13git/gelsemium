@@ -175,20 +175,50 @@ fn expand_playlist_directory(dir: PathBuf, layer: u8) -> (Vec<(u8, PathBuf)>, Ve
             return (Vec::new(), vec![err]);
         }
         let dir_contents = dir_contents_maybe.unwrap();
-        let mut result: Vec<(u8, PathBuf)> = Vec::new();
-        let mut errs: Vec<io::Error> = Vec::new();
 
-        for entry_maybe in dir_contents {
-            match entry_maybe {
+        // Split dir_contents into directories and files,
+        // then sort both.
+        let mut dirs = Vec::new();
+        let mut files = Vec::new();
+        // Errors when reading files.
+        let mut errs: Vec<io::Error> = Vec::new();
+        for entry_maybe in dir_contents{
+            match entry_maybe{
                 Err(err) => errs.push(err),
                 Ok(entry) => {
-                    let mut entry_contents =
-                        expand_playlist_directory(entry.path(), layer.saturating_add(1));
-                    result.append(&mut entry_contents.0);
-                    errs.append(&mut entry_contents.1);
+                    if entry.path().is_dir(){
+                        dirs.push(entry.path());
+                    }else{
+                        files.push(entry.path());
+                    }
                 }
             }
         }
+        dirs.sort();
+        files.sort();
+        let mut files: Vec<(u8, PathBuf)> = files.into_iter().map(|file| (layer, file)).collect();
+
+        // Recursively obtain all directory contents. Then append this dir's files.
+        let mut result: Vec<(u8, PathBuf)> = Vec::new();
+        for dir in dirs{
+            let mut contents = expand_playlist_directory(dir, layer.saturating_add(1));
+            result.append(&mut contents.0);
+            errs.append(&mut contents.1);
+        }
+        result.append(&mut files);
+        
+
+        // for entry_maybe in dir_contents {
+        //     match entry_maybe {
+        //         Err(err) => errs.push(err),
+        //         Ok(entry) => {
+        //             let mut entry_contents =
+        //                 expand_playlist_directory(entry.path(), layer.saturating_add(1));
+        //             result.append(&mut entry_contents.0);
+        //             errs.append(&mut entry_contents.1);
+        //         }
+        //     }
+        // }
 
         (result, errs)
     } else {
