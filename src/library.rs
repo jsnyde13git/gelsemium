@@ -71,9 +71,9 @@ impl LibraryFolder {
         // So we return the appropriate array index.
         println!("{index}, {prev_elems}, {nest_level}, {}", self.elements);
         println!("{}", self.name);
-        if index == prev_elems{
-            return Some(LibraryElem { is_folder: true, name: self.name.clone(), nest_level: nest_level as i32 })
-        }
+        // if index == prev_elems{
+        //     return Some(LibraryElem { is_folder: true, name: self.name.clone(), nest_level: nest_level as i32 })
+        // }
         for folder in &self.subfolders{
             if index == prev_elems{
                 // Must be this folder specifically.
@@ -84,7 +84,7 @@ impl LibraryFolder {
                 })
             }
 
-            if index < folder.elements + prev_elems{
+            if index < folder.elements + prev_elems + 1{
                 // element is in this folder
                 return folder.find(index, prev_elems + 1, nest_level+1);
             }else{
