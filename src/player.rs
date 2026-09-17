@@ -22,12 +22,11 @@ pub fn play_file_list<T: Iterator<Item = PathBuf>>(
     mut song_queue: SongQueue,
     command_queue: Arc<PlayerCommandQueue>,
 ) {
-
     // Put one song in the queue before the main loop.
     // That way we'll always have two songs in the queue, letting us do gapless. (Hopefully)
     // Not the best code I've written but a little break is fine in a five-line thing I'm sure.
-    while let Some(filepath) = &filepaths.next(){
-        if let Ok(_) = append_next_song(&player, filepath){
+    while let Some(filepath) = &filepaths.next() {
+        if let Ok(_) = append_next_song(&player, filepath) {
             println!("Playing {}", filepath.display());
             break;
         }
@@ -40,13 +39,20 @@ pub fn play_file_list<T: Iterator<Item = PathBuf>>(
     let command_queue_ref = command_queue.clone();
     let finished_playing = Arc::new(true);
     let finished_playing_ref = finished_playing.clone();
-    std::thread::spawn(move || end_song_detector(&player_ref, &command_queue_ref, &mut song_queue, &finished_playing_ref));
+    std::thread::spawn(move || {
+        end_song_detector(
+            &player_ref,
+            &command_queue_ref,
+            &mut song_queue,
+            &finished_playing_ref,
+        )
+    });
 
     while let Some(filepath) = &filepaths.next() {
         // player.append(source);
         // player.sleep_until_end();
         // std::thread::spawn(move || play_source(&player_ref, source, &command_queue_ref));
-        if let Err(_) = append_next_song(&player, filepath){
+        if let Err(_) = append_next_song(&player, filepath) {
             continue;
         }
 
@@ -78,7 +84,7 @@ pub fn play_file_list<T: Iterator<Item = PathBuf>>(
     }
 }
 
-fn append_next_song(player: &rodio::Player, filepath: &PathBuf) -> Result<(), ()>{
+fn append_next_song(player: &rodio::Player, filepath: &PathBuf) -> Result<(), ()> {
     // Open file.
     // Either open file as a BufReader, or skip to the next one if it fails.
     let file = match File::open(filepath) {
@@ -90,7 +96,11 @@ fn append_next_song(player: &rodio::Player, filepath: &PathBuf) -> Result<(), ()
     };
 
     // Try to get an audio source from that file
-    let source = match DecoderBuilder::new().with_data(file).with_gapless(true).build() {
+    let source = match DecoderBuilder::new()
+        .with_data(file)
+        .with_gapless(true)
+        .build()
+    {
         Ok(s) => s,
         Err(err) => {
             eprintln!("Error reading file {}: {err}", filepath.display());
@@ -117,11 +127,16 @@ fn play_source<T: Source + Send + 'static>(
     command_queue.add_command(PlayerCommand::SongFinished);
 }
 
-fn end_song_detector(player: &rodio::Player, command_queue: &PlayerCommandQueue, song_queue: &mut SongQueue, keep_detecting: &bool){
-    while *keep_detecting{
+fn end_song_detector(
+    player: &rodio::Player,
+    command_queue: &PlayerCommandQueue,
+    song_queue: &mut SongQueue,
+    keep_detecting: &bool,
+) {
+    while *keep_detecting {
         player.sleep_until_end();
         command_queue.add_command(PlayerCommand::SongFinished);
-        if let Some(song) = song_queue.next(){
+        if let Some(song) = song_queue.next() {
             println!("Playing {}", song.display());
         }
     }

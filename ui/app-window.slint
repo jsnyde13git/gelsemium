@@ -99,6 +99,7 @@ component PlayingMenu inherits Rectangle{
          "examplesong3",
          "examplesong4",
     ];
+    in property<[LibraryElem]> library;
     callback skip();
     callback pause();
 
@@ -124,7 +125,7 @@ component PlayingMenu inherits Rectangle{
         
         SongLibrary {
             width: 50%;
-
+            song_names: library;
         }
     }
 }
@@ -186,6 +187,7 @@ export component AppWindow inherits Window {
     callback volume_down();
     callback skip();
     in property <[string]> songs_for_selected;
+    in property <[LibraryElem]> library;
 
     // callback get_playlist_song_list(string) -> [SongOrFolder];
 
@@ -208,6 +210,7 @@ export component AppWindow inherits Window {
     }
     if state == ScreenState.playing: PlayingMenu{
         song_names: songs_for_selected;
+        library: library;
         skip => skip();
         pause => pause();
     }

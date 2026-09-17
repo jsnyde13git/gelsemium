@@ -147,15 +147,24 @@ impl Display for PlaylistParseError {
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum ExpandDirOptions {
+    KeepFolderNames,
+    DiscardFolderNames,
+}
+
 // Converts the list of folder & filenames into just a list of filenames.
 // Prints errors.
-pub fn get_playlist_filepaths(filepaths: &Vec<String>) -> (Vec<(u8, PathBuf)>, Vec<io::Error>) {
+pub fn get_playlist_filepaths(
+    filepaths: &Vec<String>,
+    keep_folders: ExpandDirOptions,
+) -> (Vec<(u8, PathBuf)>, Vec<io::Error>) {
     let mut errs: Vec<io::Error> = Vec::new();
     let mut result: Vec<(u8, PathBuf)> = Vec::new();
 
     for filepath_str in filepaths {
         let path = PathBuf::from(filepath_str);
-        let (mut path_result, mut path_errs) = expand_playlist_directory(path, 0);
+        let (mut path_result, mut path_errs) = expand_playlist_directory(path, 0, keep_folders);
         errs.append(&mut path_errs);
         result.append(&mut path_result);
     }
@@ -166,7 +175,11 @@ pub fn get_playlist_filepaths(filepaths: &Vec<String>) -> (Vec<(u8, PathBuf)>, V
 // Receives a path that may or may not be a directory,
 // and returns every file & folder in that directory.
 // Runs recursively on each subdirectory.
-fn expand_playlist_directory(dir: PathBuf, layer: u8) -> (Vec<(u8, PathBuf)>, Vec<io::Error>) {
+fn expand_playlist_directory(
+    dir: PathBuf,
+    layer: u8,
+    keep_folders: ExpandDirOptions,
+) -> (Vec<(u8, PathBuf)>, Vec<io::Error>) {
     if dir.is_dir() {
         // for each entry in dir_path, find its name as a string,
         // then call expand playlist directory recursively on each
@@ -182,13 +195,13 @@ fn expand_playlist_directory(dir: PathBuf, layer: u8) -> (Vec<(u8, PathBuf)>, Ve
         let mut files = Vec::new();
         // Errors when reading files.
         let mut errs: Vec<io::Error> = Vec::new();
-        for entry_maybe in dir_contents{
-            match entry_maybe{
+        for entry_maybe in dir_contents {
+            match entry_maybe {
                 Err(err) => errs.push(err),
                 Ok(entry) => {
-                    if entry.path().is_dir(){
+                    if entry.path().is_dir() {
                         dirs.push(entry.path());
-                    }else{
+                    } else {
                         files.push(entry.path());
                     }
                 }
@@ -200,13 +213,16 @@ fn expand_playlist_directory(dir: PathBuf, layer: u8) -> (Vec<(u8, PathBuf)>, Ve
 
         // Recursively obtain all directory contents. Then append this dir's files.
         let mut result: Vec<(u8, PathBuf)> = Vec::new();
-        for dir in dirs{
-            let mut contents = expand_playlist_directory(dir, layer.saturating_add(1));
+        for dir in dirs {
+            if let ExpandDirOptions::KeepFolderNames = keep_folders {
+                result.push((layer, dir.clone()));
+            }
+            let mut contents =
+                expand_playlist_directory(dir, layer.saturating_add(1), keep_folders);
             result.append(&mut contents.0);
             errs.append(&mut contents.1);
         }
         result.append(&mut files);
-        
 
         // for entry_maybe in dir_contents {
         //     match entry_maybe {

@@ -11,9 +11,10 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use rust_music_player::player::{PlayerCommand, PlayerCommandQueue, SongQueue, play_file_list};
-use rust_music_player::playlist_parser::get_playlist_filepaths;
 use rust_music_player::playlist_parser::parse_playlists;
-use rust_music_player::ui::AppWindow;
+use rust_music_player::playlist_parser::{ExpandDirOptions, get_playlist_filepaths};
+use rust_music_player::ui::{AppWindow, LibraryElem};
+use rust_music_player::library::Library;
 
 fn main() {
     // Take all non-initial CLI arguments and put them into a string.
@@ -66,7 +67,8 @@ fn play_cli(playlist_name: String) {
     let playlist_filepaths = playlist_filepaths_maybe.unwrap();
 
     // Expand filepaths into a full list.
-    let (playlist, errs) = get_playlist_filepaths(playlist_filepaths);
+    let (playlist, errs) =
+        get_playlist_filepaths(playlist_filepaths, ExpandDirOptions::DiscardFolderNames);
     for err in errs {
         eprintln!("Error: {err:?}");
     }
@@ -86,11 +88,13 @@ fn play_cli(playlist_name: String) {
     println!("p: Pause/Play");
 
     let filepaths = playlist.into_iter().map(|x| x.1).collect::<Vec<PathBuf>>();
-    let playlist_paths = SongQueue::new(
-        filepaths.clone(),
-        None,
+    let playlist_paths = SongQueue::new(filepaths.clone(), None);
+    play_file_list(
+        player,
+        filepaths.into_iter(),
+        playlist_paths.0,
+        command_queue,
     );
-    play_file_list(player, filepaths.into_iter(), playlist_paths.0, command_queue);
 }
 
 fn play_gui() -> Result<(), PlatformError> {
@@ -113,7 +117,8 @@ fn play_gui() -> Result<(), PlatformError> {
 
     let lib_default = Vec::new();
     let library_initial = playlists.get("Library").unwrap_or(&lib_default);
-    let (library_paths, _) = get_playlist_filepaths(library_initial);
+    let (library_paths, _) =
+        get_playlist_filepaths(library_initial, ExpandDirOptions::DiscardFolderNames);
     let library_paths = library_paths
         .into_iter()
         .map(|(depth, path)| (depth as i32, path))
@@ -158,6 +163,30 @@ fn ui_on_play_playlist(
 ) {
     let ui = ui.unwrap();
     let playlists = playlists.lock().unwrap();
+    // Get the library, if it exists. If not, let it be empty.
+    // let library_default = Vec::new();
+    // let library = playlists.get("Library").unwrap_or(&library_default);
+    // let (library, _) = get_playlist_filepaths(library, ExpandDirOptions::KeepFolderNames);
+    // println!("{:?}", library);
+    // let library = library
+    //     .into_iter()
+    //     .filter_map(|(depth, path)| {
+    //         if let Some(name) = path.file_name() {
+    //             Some(LibraryElem {
+    //                 is_folder: path.is_dir(),
+    //                 name: name.to_string_lossy().into_owned().into(),
+    //                 nest_level: depth as i32,
+    //             })
+    //         } else {
+    //             None
+    //         }
+    //     })
+    //     .collect::<Vec<LibraryElem>>();
+    // println!("{:?}", library);
+    // let library_model = ModelRc::new(VecModel::from(library));
+    let library = Library::get_library(&playlists);
+    let library_model = ModelRc::new(Rc::new(library));
+
     // If we're at this point, the user clicked a play playlist button.
     // Given that that button had to exist for the user to click it,
     // I think it's safe to assume the playlist exists.
@@ -165,24 +194,30 @@ fn ui_on_play_playlist(
     let playlist_paths = playlists
         .get(&playlist_name.to_string())
         .expect("ERROR: Tried to play playlist that didn't exist; this is a bug");
-    let (playlist, _) = get_playlist_filepaths(playlist_paths);
+    let (playlist, _) =
+        get_playlist_filepaths(playlist_paths, ExpandDirOptions::DiscardFolderNames);
     let filepaths = playlist
-            .into_iter()
-            .map(|x| x.1.clone())
-            .collect::<Vec<PathBuf>>();
-    let (song_queue, song_model) = SongQueue::new(
-        filepaths.clone(),
-        Some(ui.as_weak()),
-    );
+        .into_iter()
+        .map(|x| x.1.clone())
+        .collect::<Vec<PathBuf>>();
+    let (song_queue, song_model) = SongQueue::new(filepaths.clone(), Some(ui.as_weak()));
 
     // Spawn the playing thread.
     let command_queue = Arc::new(PlayerCommandQueue::new());
     let command_queue_player = command_queue.clone();
     let player2 = player.clone();
-    std::thread::spawn(move || play_file_list(player2, filepaths.into_iter(), song_queue, command_queue_player));
+    std::thread::spawn(move || {
+        play_file_list(
+            player2,
+            filepaths.into_iter(),
+            song_queue,
+            command_queue_player,
+        )
+    });
 
-    // Connect the song model to the UI.
+    // Connect the song model and library to the UI.
     ui.set_songs_for_selected(song_model);
+    ui.set_library(library_model);
 
     // Connect the command queue to the UI.
     let cqueue = command_queue.clone();
