@@ -85,11 +85,12 @@ fn play_cli(playlist_name: String) {
     println!("d/e: Volume down/up");
     println!("p: Pause/Play");
 
+    let filepaths = playlist.into_iter().map(|x| x.1).collect::<Vec<PathBuf>>();
     let playlist_paths = SongQueue::new(
-        playlist.into_iter().map(|x| x.1).collect::<Vec<PathBuf>>(),
+        filepaths.clone(),
         None,
     );
-    play_file_list(player, playlist_paths.0, command_queue);
+    play_file_list(player, filepaths.into_iter(), playlist_paths.0, command_queue);
 }
 
 fn play_gui() -> Result<(), PlatformError> {
@@ -165,11 +166,12 @@ fn ui_on_play_playlist(
         .get(&playlist_name.to_string())
         .expect("ERROR: Tried to play playlist that didn't exist; this is a bug");
     let (playlist, _) = get_playlist_filepaths(playlist_paths);
-    let (song_queue, song_model) = SongQueue::new(
-        playlist
+    let filepaths = playlist
             .into_iter()
             .map(|x| x.1.clone())
-            .collect::<Vec<PathBuf>>(),
+            .collect::<Vec<PathBuf>>();
+    let (song_queue, song_model) = SongQueue::new(
+        filepaths.clone(),
         Some(ui.as_weak()),
     );
 
@@ -177,7 +179,7 @@ fn ui_on_play_playlist(
     let command_queue = Arc::new(PlayerCommandQueue::new());
     let command_queue_player = command_queue.clone();
     let player2 = player.clone();
-    std::thread::spawn(move || play_file_list(player2, song_queue, command_queue_player));
+    std::thread::spawn(move || play_file_list(player2, filepaths.into_iter(), song_queue, command_queue_player));
 
     // Connect the song model to the UI.
     ui.set_songs_for_selected(song_model);

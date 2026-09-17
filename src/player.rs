@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex};
 
+use rodio::decoder::DecoderBuilder;
 use rodio::{Decoder, Source};
 use slint::{Model, ModelNotify, ModelRc, SharedString, Weak};
 
@@ -18,35 +19,36 @@ use crate::ui::AppWindow;
 pub fn play_file_list<T: Iterator<Item = PathBuf>>(
     player: Arc<rodio::Player>,
     mut filepaths: T,
+    mut song_queue: SongQueue,
     command_queue: Arc<PlayerCommandQueue>,
 ) {
+
+    // Put one song in the queue before the main loop.
+    // That way we'll always have two songs in the queue, letting us do gapless. (Hopefully)
+    // Not the best code I've written but a little break is fine in a five-line thing I'm sure.
+    while let Some(filepath) = &filepaths.next(){
+        if let Ok(_) = append_next_song(&player, filepath){
+            println!("Playing {}", filepath.display());
+            break;
+        }
+    }
+
+    // Create the end song detector thread.
+    // MUST be after the first file is added to the queue.
+    // Otherwise it'll just blow through all the filenames before one even gets added.
+    let player_ref = player.clone();
+    let command_queue_ref = command_queue.clone();
+    let finished_playing = Arc::new(true);
+    let finished_playing_ref = finished_playing.clone();
+    std::thread::spawn(move || end_song_detector(&player_ref, &command_queue_ref, &mut song_queue, &finished_playing_ref));
+
     while let Some(filepath) = &filepaths.next() {
-        // Open file.
-        // Either open file as a BufReader, or skip to the next one if it fails.
-        let file = match File::open(filepath) {
-            Ok(f) => BufReader::new(f),
-            Err(err) => {
-                eprintln!("Error reading file {}: {err}", filepath.display());
-                continue;
-            }
-        };
-
-        // Try to get an audio source from that file
-        let source = match Decoder::try_from(file) {
-            Ok(s) => s,
-            Err(err) => {
-                eprintln!("Error reading file {}: {err}", filepath.display());
-                continue;
-            }
-        };
-
-        // Play file
-        println!("Playing {}", filepath.display());
         // player.append(source);
         // player.sleep_until_end();
-        let player_ref = player.clone();
-        let command_queue_ref = command_queue.clone();
-        std::thread::spawn(move || play_source(&player_ref, source, &command_queue_ref));
+        // std::thread::spawn(move || play_source(&player_ref, source, &command_queue_ref));
+        if let Err(_) = append_next_song(&player, filepath){
+            continue;
+        }
 
         // Read commands. If Skip or SongFinished appears, move to the next song.
         // Note that Skip, since it skips one and we only ever have one in the queue,
@@ -76,6 +78,33 @@ pub fn play_file_list<T: Iterator<Item = PathBuf>>(
     }
 }
 
+fn append_next_song(player: &rodio::Player, filepath: &PathBuf) -> Result<(), ()>{
+    // Open file.
+    // Either open file as a BufReader, or skip to the next one if it fails.
+    let file = match File::open(filepath) {
+        Ok(f) => BufReader::new(f),
+        Err(err) => {
+            eprintln!("Error reading file {}: {err}", filepath.display());
+            return Err(());
+        }
+    };
+
+    // Try to get an audio source from that file
+    let source = match DecoderBuilder::new().with_data(file).with_gapless(true).build() {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!("Error reading file {}: {err}", filepath.display());
+            return Err(());
+        }
+    };
+
+    // Play file
+    // TODO fix this print statement
+    println!("Appending {}", filepath.display());
+    player.append(source);
+    Ok(())
+}
+
 /// Meant to run in a separate thread.
 /// Will push a `PlayerCommand::SongFinished` update when done.
 fn play_source<T: Source + Send + 'static>(
@@ -86,6 +115,16 @@ fn play_source<T: Source + Send + 'static>(
     player.append(source);
     player.sleep_until_end();
     command_queue.add_command(PlayerCommand::SongFinished);
+}
+
+fn end_song_detector(player: &rodio::Player, command_queue: &PlayerCommandQueue, song_queue: &mut SongQueue, keep_detecting: &bool){
+    while *keep_detecting{
+        player.sleep_until_end();
+        command_queue.add_command(PlayerCommand::SongFinished);
+        if let Some(song) = song_queue.next(){
+            println!("Playing {}", song.display());
+        }
+    }
 }
 
 pub enum PlayerCommand {
