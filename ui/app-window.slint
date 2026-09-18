@@ -1,4 +1,4 @@
-import { Button, VerticalBox, TextEdit, HorizontalBox } from "std-widgets.slint";
+import { Button, VerticalBox, TextEdit, HorizontalBox, ScrollView } from "std-widgets.slint";
 // import "./LeagueMono-VF.ttf";
 
 struct LibraryElem{
@@ -18,17 +18,19 @@ component SongLibrary inherits Rectangle{
     background: #672b78;
     property<length> offset_per_nest: 10px;
 
-    VerticalLayout{
-        alignment: start;
-        for song[i] in song_names: HorizontalBox{
-            x: offset_per_nest*song.nest_level;
+    ScrollView {
+        VerticalLayout{
             alignment: start;
-            Text{
-                text: song.name;
-                horizontal-alignment: start;
+            for song[i] in song_names: HorizontalBox{
+                x: offset_per_nest*song.nest_level;
+                alignment: start;
+                Text{
+                    text: song.name;
+                    horizontal-alignment: start;
+                }
             }
-        }
-    }   
+        }   
+    }
 }
 
 // Queue of currently-playing songs.

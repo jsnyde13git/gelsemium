@@ -200,7 +200,8 @@ fn ui_on_play_playlist(
         .into_iter()
         .map(|x| x.1.clone())
         .collect::<Vec<PathBuf>>();
-    let (song_queue, song_model) = SongQueue::new(filepaths.clone(), Some(ui.as_weak()));
+    let (visual_song_queue, song_model) = SongQueue::new(filepaths.clone(), Some(ui.as_weak()));
+    let (file_song_queue, _) = SongQueue::new(filepaths.clone(), None);
 
     // Spawn the playing thread.
     let command_queue = Arc::new(PlayerCommandQueue::new());
@@ -209,8 +210,8 @@ fn ui_on_play_playlist(
     std::thread::spawn(move || {
         play_file_list(
             player2,
-            filepaths.into_iter(),
-            song_queue,
+            file_song_queue,
+            visual_song_queue,
             command_queue_player,
         )
     });

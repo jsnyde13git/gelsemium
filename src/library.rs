@@ -69,11 +69,6 @@ impl LibraryFolder {
         // then we skip this folder.
         // After all folders have been exhausted, we know that it must be in this folder. 
         // So we return the appropriate array index.
-        println!("{index}, {prev_elems}, {nest_level}, {}", self.elements);
-        println!("{}", self.name);
-        // if index == prev_elems{
-        //     return Some(LibraryElem { is_folder: true, name: self.name.clone(), nest_level: nest_level as i32 })
-        // }
         for folder in &self.subfolders{
             if index == prev_elems{
                 // Must be this folder specifically.
@@ -94,7 +89,6 @@ impl LibraryFolder {
         }
 
         // no more folders; must be a song within this folder
-        println!("{index}, {prev_elems}");
         if let Some(song) = self.songs.get(index - prev_elems){
             Some(LibraryElem{
                 nest_level: nest_level as i32,
@@ -113,6 +107,7 @@ struct LibrarySong {
 }
 
 impl Library {
+    // TODO: Remove non-audio files.
     pub fn get_library(playlists: &HashMap<String, Vec<String>>) -> Library {
         let Some(library_paths) = playlists.get("Library") else{
             return Library { 

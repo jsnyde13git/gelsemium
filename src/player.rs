@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex};
 
 use rodio::decoder::DecoderBuilder;
-use rodio::{Decoder, Source};
+use rodio::{Decoder, Player, Source};
 use slint::{Model, ModelNotify, ModelRc, SharedString, Weak};
 
 use crate::ui::AppWindow;
@@ -26,6 +26,7 @@ pub fn play_file_list<T: Iterator<Item = PathBuf>>(
     // That way we'll always have two songs in the queue, letting us do gapless. (Hopefully)
     // Not the best code I've written but a little break is fine in a five-line thing I'm sure.
     while let Some(filepath) = &filepaths.next() {
+        song_queue.next();
         if let Ok(_) = append_next_song(&player, filepath) {
             println!("Playing {}", filepath.display());
             break;
@@ -52,33 +53,42 @@ pub fn play_file_list<T: Iterator<Item = PathBuf>>(
         // player.append(source);
         // player.sleep_until_end();
         // std::thread::spawn(move || play_source(&player_ref, source, &command_queue_ref));
-        if let Err(_) = append_next_song(&player, filepath) {
-            continue;
-        }
+        // if let Err(_) = append_next_song(&player, filepath) {
+        //     continue;
+        // }
+        let filepath_copy = filepath.clone();
+        let player_copy = player.clone();
+        std::thread::spawn(move || append_next_song(&player_copy, &filepath_copy));
 
-        // Read commands. If Skip or SongFinished appears, move to the next song.
-        // Note that Skip, since it skips one and we only ever have one in the queue,
-        // immediately causes the player thread to send a SongFinished event.
-        let mut next_song = false;
-        while !next_song {
-            command_queue.wait_for_command();
-            let cmds = command_queue.take_commands();
-            for cmd in cmds {
-                match cmd {
-                    PlayerCommand::Pause => {
-                        if player.is_paused() {
-                            player.play();
-                        } else {
-                            player.pause();
-                        }
+        wait_for_command(&command_queue, &player);
+    }
+    // We wait one time at the end
+    wait_for_command(&command_queue, &player);
+}
+
+fn wait_for_command(command_queue: &PlayerCommandQueue, player: &Player){
+    // Read commands. If Skip or SongFinished appears, move to the next song.
+    // Note that Skip, since it skips one and we only ever have one in the queue,
+    // immediately causes the player thread to send a SongFinished event.
+    let mut next_song = false;
+    while !next_song {
+        command_queue.wait_for_command();
+        let cmds = command_queue.take_commands();
+        for cmd in cmds {
+            match cmd {
+                PlayerCommand::Pause => {
+                    if player.is_paused() {
+                        player.play();
+                    } else {
+                        player.pause();
                     }
-                    PlayerCommand::VolumeUp => {}
-                    PlayerCommand::VolumeDown => {}
-                    PlayerCommand::Skip => {
-                        player.skip_one();
-                    }
-                    PlayerCommand::SongFinished => next_song = true,
                 }
+                PlayerCommand::VolumeUp => {}
+                PlayerCommand::VolumeDown => {}
+                PlayerCommand::Skip => {
+                    player.skip_one();
+                }
+                PlayerCommand::SongFinished => next_song = true,
             }
         }
     }
@@ -109,8 +119,6 @@ fn append_next_song(player: &rodio::Player, filepath: &PathBuf) -> Result<(), ()
     };
 
     // Play file
-    // TODO fix this print statement
-    println!("Appending {}", filepath.display());
     player.append(source);
     Ok(())
 }
@@ -137,11 +145,12 @@ fn end_song_detector(
         player.sleep_until_end();
         command_queue.add_command(PlayerCommand::SongFinished);
         if let Some(song) = song_queue.next() {
-            println!("Playing {}", song.display());
+            println!("Playing2 {}", song.display());
         }
     }
 }
 
+#[derive(Debug)]
 pub enum PlayerCommand {
     Skip,
     Pause,
