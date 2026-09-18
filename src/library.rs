@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io, path::PathBuf};
+use std::{cell::RefCell, collections::HashMap, io, path::PathBuf};
 
 use slint::{Model, ModelNotify, SharedString};
 use crate::ui::LibraryElem;
@@ -21,7 +21,7 @@ use crate::ui::LibraryElem;
 // }
 
 pub struct Library {
-    contents: LibraryFolder,
+    contents: RefCell<LibraryFolder>,
     tracker: ModelNotify,
 }
 
@@ -29,16 +29,21 @@ impl Model for Library {
     type Data = LibraryElem;
 
     fn row_count(&self) -> usize {
-        self.contents.elements
+        self.contents.borrow().elements
     }
 
     fn row_data(&self, row: usize) -> Option<Self::Data> {
-        self.contents.find(row, 0, 0)
+        self.contents.borrow().find(row, 0, 0)
     }
 
     fn model_tracker(&self) -> &dyn slint::ModelTracker {
         &self.tracker
     }
+}
+
+enum InternalLibraryElem<'a>{
+    Folder(&'a mut LibraryFolder),
+    Song(&'a mut LibrarySong),
 }
 
 struct LibraryFolder {
@@ -75,13 +80,23 @@ impl LibraryFolder {
                 return Some(LibraryElem{
                     nest_level: nest_level as i32,
                     name: folder.name.clone(),
-                    is_folder: true
+                    is_folder: true,
+                    is_hidden: self.hidden,
                 })
             }
 
             if index < folder.elements + prev_elems + 1{
                 // element is in this folder
-                return folder.find(index, prev_elems + 1, nest_level+1);
+                if self.hidden{
+                    return Some(LibraryElem{
+                        nest_level: nest_level as i32,
+                        name: "".to_string().into(),
+                        is_folder: true,
+                        is_hidden: true,
+                    });
+                }else{
+                    return folder.find(index, prev_elems + 1, nest_level+1);
+                }
             }else{
                 // skip this folder
                 prev_elems += 1 + folder.elements;
@@ -93,8 +108,34 @@ impl LibraryFolder {
             Some(LibraryElem{
                 nest_level: nest_level as i32,
                 name: song.name.clone(),
-                is_folder: false
+                is_folder: false,
+                is_hidden: self.hidden,
             })
+        }else{
+            None
+        }
+    }
+
+    fn find_mut<'a>(&'a mut self, index: usize, mut prev_elems: usize,) -> Option<InternalLibraryElem<'a>>{
+        // Same algorithm as find above, but it returns a mutable reference.
+        for folder in self.subfolders.iter_mut(){
+            if index == prev_elems{
+                // Must be this folder specifically.
+                return Some(InternalLibraryElem::Folder(folder));
+            }
+
+            if index < folder.elements + prev_elems + 1{
+                // element is in this folder
+                return folder.find_mut(index, prev_elems + 1);
+            }else{
+                // skip this folder
+                prev_elems += 1 + folder.elements;
+            }
+        }
+
+        // no more folders; must be a song within this folder
+        if let Some(song) = self.songs.get_mut(index - prev_elems){
+            Some(InternalLibraryElem::Song(song))
         }else{
             None
         }
@@ -111,13 +152,13 @@ impl Library {
     pub fn get_library(playlists: &HashMap<String, Vec<String>>) -> Library {
         let Some(library_paths) = playlists.get("Library") else{
             return Library { 
-                contents: LibraryFolder { 
+                contents: RefCell::new(LibraryFolder { 
                         subfolders: Vec::new(), 
                         songs: Vec::new(), 
                         name: "".into(), 
                         elements: 0, 
                         hidden: false 
-                    },
+                    }),
                 tracker: ModelNotify::default(),
             }
         };
@@ -144,7 +185,7 @@ impl Library {
         }
 
         Library{
-            contents: LibraryFolder{
+            contents: RefCell::new(LibraryFolder{
                 elements: songs.len()
                     + subfolders
                         .iter()
@@ -153,7 +194,7 @@ impl Library {
                 songs,
                 name: "".into(),
                 hidden: false,
-            },
+            }),
             tracker: ModelNotify::default(),
         }
     }
@@ -235,6 +276,23 @@ impl Library {
             }),
             errs,
         )
+    }
+
+    pub fn try_hide(&self, index: usize) -> Result<(), ()>{
+        let result = if let Some(elem) = self.contents.borrow_mut().find_mut(index, 0){
+            match elem {
+                InternalLibraryElem::Folder(folder) => {
+                    folder.hidden = !folder.hidden;
+                    Ok(())
+                },
+                InternalLibraryElem::Song(_) => Err(()),
+            }
+        }else{
+            Err(())
+        };
+
+        self.tracker.reset();
+        return result;
     }
 }
 

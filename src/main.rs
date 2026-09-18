@@ -166,29 +166,19 @@ fn ui_on_play_playlist(
 ) {
     let ui = ui.unwrap();
     let playlists = playlists.lock().unwrap();
-    // Get the library, if it exists. If not, let it be empty.
-    // let library_default = Vec::new();
-    // let library = playlists.get("Library").unwrap_or(&library_default);
-    // let (library, _) = get_playlist_filepaths(library, ExpandDirOptions::KeepFolderNames);
-    // println!("{:?}", library);
-    // let library = library
-    //     .into_iter()
-    //     .filter_map(|(depth, path)| {
-    //         if let Some(name) = path.file_name() {
-    //             Some(LibraryElem {
-    //                 is_folder: path.is_dir(),
-    //                 name: name.to_string_lossy().into_owned().into(),
-    //                 nest_level: depth as i32,
-    //             })
-    //         } else {
-    //             None
-    //         }
-    //     })
-    //     .collect::<Vec<LibraryElem>>();
-    // println!("{:?}", library);
-    // let library_model = ModelRc::new(VecModel::from(library));
-    let library = Library::get_library(&playlists);
-    let library_model = ModelRc::new(Rc::new(library));
+
+    let library = Rc::new(Library::get_library(&playlists));
+    let library_model = ModelRc::new(library.clone());
+
+    {
+        let ui_ref = ui.as_weak();
+        let library_ref = library.clone();
+        ui.on_library_elem_clicked(move |index| {
+            let ui = ui_ref.unwrap();
+            let _ = library_ref.try_hide(index as usize);
+            
+        });
+    }
 
     // If we're at this point, the user clicked a play playlist button.
     // Given that that button had to exist for the user to click it,

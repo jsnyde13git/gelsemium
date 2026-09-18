@@ -1,6 +1,7 @@
 pub mod library;
 pub mod player;
 pub mod playlist_parser;
+pub mod playlist_data;
 
 #[allow(clippy::all)]
 pub mod ui {

@@ -4,7 +4,8 @@ import { Button, VerticalBox, TextEdit, HorizontalBox, ScrollView, ListView } fr
 struct LibraryElem{
     name: string,
     nest_level: int,
-    is_folder: bool,    
+    is_folder: bool,
+    is_hidden: bool,
 }
 
 // Display the songs in the library.
@@ -12,20 +13,36 @@ component SongLibrary inherits Rectangle{
     in property<[LibraryElem]> song_names: [
         {name: "folder1", nest_level: 0, is_folder: true}, 
         {name: "examplesong1", nest_level: 1, is_folder: false}, 
-        {name: "folder2", nest_level: 1, is_folder: true}, 
+        {name: "folder2", nest_level: 1, is_folder: true, is_hidden: false}, 
         {name: "examplesong3", nest_level: 2, is_folder: false}, 
         {name: "examplesong4", nest_level: 0, is_folder: false}];
     background: #672b78;
-    property<length> offset_per_nest: 10px;
+    property<length> offset_per_nest: 20px;
+    callback library_elem_clicked(int);
+    property<length> lib_width: self.width;
 
     ListView{
-        for song[i] in song_names: HorizontalBox{
-            x: offset_per_nest*song.nest_level;
+        for song[i] in song_names: HorizontalLayout{
+            padding: 2px;
+            x: offset_per_nest*song.nest_level + 5px;
             alignment: start;
-            Text{
-                text: song.name;
-                horizontal-alignment: start;
+            preferred-height: !song.is_hidden ? 22px : 0px;
+
+            if !song.is_hidden: Rectangle{
+                preferred-width: lib_width - parent.x;
+                TouchArea{
+                    preferred-height: 100%;
+                    preferred-width: 100%;
+                    Text{
+                        x: 0;
+                        text: song.name;
+                        horizontal-alignment: start;
+                    }
+                    clicked => library_elem_clicked(i);
+                }
             }
+                
+            
         }
     }   
 }
@@ -99,6 +116,7 @@ component PlayingMenu inherits Rectangle{
     in property<[LibraryElem]> library;
     callback skip();
     callback pause();
+    callback library_elem_clicked(int);
     background: #f675f6;
 
     HorizontalBox {
@@ -124,6 +142,7 @@ component PlayingMenu inherits Rectangle{
         SongLibrary {
             width: 50%;
             song_names: library;
+            library_elem_clicked(index) => library_elem_clicked(index);
         }
     }
 }
@@ -184,6 +203,7 @@ export component AppWindow inherits Window {
     callback volume_up();
     callback volume_down();
     callback skip();
+    callback library_elem_clicked(int);
     in property <[string]> songs_for_selected;
     in property <[LibraryElem]> library;
 
@@ -209,8 +229,8 @@ export component AppWindow inherits Window {
         library: library;
         skip => skip();
         pause => pause();
+        library_elem_clicked(index) => library_elem_clicked(index);
     }
-    
 }
 
 
