@@ -25,9 +25,11 @@ pub fn play_file_list<T: Iterator<Item = PathBuf>>(
     // Put one song in the queue before the main loop.
     // That way we'll always have two songs in the queue, letting us do gapless. (Hopefully)
     // Not the best code I've written but a little break is fine in a five-line thing I'm sure.
+    // Also this reading mutex is mainly used later.
+    let reading_mutex = Arc::new(Mutex::new(()));
     while let Some(filepath) = &filepaths.next() {
         song_queue.next();
-        if let Ok(_) = append_next_song(&player, filepath) {
+        if let Ok(_) = append_next_song(&player, filepath, &reading_mutex) {
             println!("Playing {}", filepath.display());
             break;
         }
@@ -36,16 +38,21 @@ pub fn play_file_list<T: Iterator<Item = PathBuf>>(
     // Create the end song detector thread.
     // MUST be after the first file is added to the queue.
     // Otherwise it'll just blow through all the filenames before one even gets added.
+    // Well, now that there's the mutex thing, I could just lock the mutex,
+    // spawn the thread, read the thing, and then unlock the mutex.
+    // That seems more complicated and messy though.
     let player_ref = player.clone();
     let command_queue_ref = command_queue.clone();
     let finished_playing = Arc::new(true);
     let finished_playing_ref = finished_playing.clone();
+    let reading_mutex_ref = reading_mutex.clone();
     std::thread::spawn(move || {
         end_song_detector(
             &player_ref,
             &command_queue_ref,
             &mut song_queue,
             &finished_playing_ref,
+            &reading_mutex_ref,
         )
     });
 
@@ -58,7 +65,8 @@ pub fn play_file_list<T: Iterator<Item = PathBuf>>(
         // }
         let filepath_copy = filepath.clone();
         let player_copy = player.clone();
-        std::thread::spawn(move || append_next_song(&player_copy, &filepath_copy));
+        let reading_mutex_copy = reading_mutex.clone();
+        std::thread::spawn(move || append_next_song(&player_copy, &filepath_copy, &reading_mutex_copy));
 
         wait_for_command(&command_queue, &player);
     }
@@ -94,7 +102,10 @@ fn wait_for_command(command_queue: &PlayerCommandQueue, player: &Player){
     }
 }
 
-fn append_next_song(player: &rodio::Player, filepath: &PathBuf) -> Result<(), ()> {
+fn append_next_song(player: &rodio::Player, filepath: &PathBuf, reading_mutex: &Mutex<()>) -> Result<(), ()> {
+    // Lock the mutex.
+    let _lock = reading_mutex.lock();
+
     // Open file.
     // Either open file as a BufReader, or skip to the next one if it fails.
     let file = match File::open(filepath) {
@@ -140,12 +151,20 @@ fn end_song_detector(
     command_queue: &PlayerCommandQueue,
     song_queue: &mut SongQueue,
     keep_detecting: &bool,
+    sync_mutex: &Mutex<()>,
 ) {
     while *keep_detecting {
+        // Attempt locking the mutex.
+        // If a song is currently being read, 
+        // the mutex will be locked by the main player,
+        // so this won't be able to send song queue updates until that's done.
+        {
+            let _lock = sync_mutex.lock();
+        }
         player.sleep_until_end();
         command_queue.add_command(PlayerCommand::SongFinished);
         if let Some(song) = song_queue.next() {
-            println!("Playing2 {}", song.display());
+            println!("Playing {}", song.display());
         }
     }
 }

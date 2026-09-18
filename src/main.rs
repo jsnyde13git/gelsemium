@@ -141,7 +141,10 @@ fn play_gui() -> Result<(), PlatformError> {
     let ui_weak_for_play_ui = ui.as_weak();
 
     let mut handle =
-        rodio::DeviceSinkBuilder::open_default_sink().expect("Opening default audio stream failed");
+        rodio::DeviceSinkBuilder::from_default_device()
+        .expect("Opening audio stream failed")
+        .with_buffer_size(rodio::cpal::BufferSize::Fixed(2048))
+        .open_stream().expect("Opening audio stream failed");
     handle.log_on_drop(true);
     let player = Arc::new(rodio::Player::connect_new(&handle.mixer()));
     let player_for_on_play = player.clone();
