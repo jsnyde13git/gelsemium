@@ -1,4 +1,4 @@
-import { Button, VerticalBox, TextEdit, HorizontalBox, ScrollView } from "std-widgets.slint";
+import { Button, VerticalBox, TextEdit, HorizontalBox, ScrollView, ListView } from "std-widgets.slint";
 // import "./LeagueMono-VF.ttf";
 
 struct LibraryElem{
@@ -18,19 +18,16 @@ component SongLibrary inherits Rectangle{
     background: #672b78;
     property<length> offset_per_nest: 10px;
 
-    ScrollView {
-        VerticalLayout{
+    ListView{
+        for song[i] in song_names: HorizontalBox{
+            x: offset_per_nest*song.nest_level;
             alignment: start;
-            for song[i] in song_names: HorizontalBox{
-                x: offset_per_nest*song.nest_level;
-                alignment: start;
-                Text{
-                    text: song.name;
-                    horizontal-alignment: start;
-                }
+            Text{
+                text: song.name;
+                horizontal-alignment: start;
             }
-        }   
-    }
+        }
+    }   
 }
 
 // Queue of currently-playing songs.
@@ -44,8 +41,7 @@ component SongQueue inherits Rectangle{
     background: #672b78;
     property<length> offset_per_nest: 10px;
 
-    VerticalLayout{
-        alignment: start;
+    ListView {
         for song[i] in song_names: HorizontalBox{
             alignment: start;
             Text{
@@ -53,8 +49,7 @@ component SongQueue inherits Rectangle{
                 horizontal-alignment: start;
             }
         }
-    }
-    
+    }   
 }
 
 component PlayerControls inherits Rectangle{
@@ -104,6 +99,7 @@ component PlayingMenu inherits Rectangle{
     in property<[LibraryElem]> library;
     callback skip();
     callback pause();
+    background: #f675f6;
 
     HorizontalBox {
         alignment: stretch;
@@ -190,8 +186,6 @@ export component AppWindow inherits Window {
     callback skip();
     in property <[string]> songs_for_selected;
     in property <[LibraryElem]> library;
-
-    // callback get_playlist_song_list(string) -> [SongOrFolder];
 
     // For the PlaylistSelect state.
     in property <[string]> playlist_names: ["Example Playlist", "Example Playlist 2.0"];
