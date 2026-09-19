@@ -91,8 +91,8 @@ fn play_cli(playlist_name: String) {
     let playlist_paths = SongQueue::new(filepaths.clone(), None);
     play_file_list(
         player,
-        filepaths.into_iter(),
-        playlist_paths.0,
+        Arc::new(Mutex::new(filepaths.into_iter())),
+        Arc::new(Mutex::new(playlist_paths.0)),
         command_queue,
     );
 }
@@ -170,16 +170,6 @@ fn ui_on_play_playlist(
     let library = Rc::new(Library::get_library(&playlists));
     let library_model = ModelRc::new(library.clone());
 
-    {
-        let ui_ref = ui.as_weak();
-        let library_ref = library.clone();
-        ui.on_library_elem_clicked(move |index| {
-            let ui = ui_ref.unwrap();
-            let _ = library_ref.try_hide(index as usize);
-            
-        });
-    }
-
     // If we're at this point, the user clicked a play playlist button.
     // Given that that button had to exist for the user to click it,
     // I think it's safe to assume the playlist exists.
@@ -195,6 +185,21 @@ fn ui_on_play_playlist(
         .collect::<Vec<PathBuf>>();
     let (visual_song_queue, song_model) = SongQueue::new(filepaths.clone(), Some(ui.as_weak()));
     let (file_song_queue, _) = SongQueue::new(filepaths.clone(), None);
+    let visual_song_queue = Arc::new(Mutex::new(visual_song_queue));
+    let file_song_queue = Arc::new(Mutex::new(file_song_queue));
+
+    {
+        let ui_ref = ui.as_weak();
+        let library_ref = library.clone();
+        let visual_song_queue_ref = visual_song_queue.clone();
+        let file_song_queue_ref = file_song_queue.clone();
+        ui.on_library_elem_clicked(move |index| {
+            let ui = ui_ref.unwrap();
+            let _ = library_ref.hide_or_queue(index as usize,
+                &mut visual_song_queue_ref.lock().unwrap(), 
+                &mut file_song_queue_ref.lock().unwrap());
+        });
+    }
 
     // Spawn the playing thread.
     let command_queue = Arc::new(PlayerCommandQueue::new());
