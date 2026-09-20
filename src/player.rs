@@ -17,9 +17,8 @@ use crate::ui::AppWindow;
 // need to be passed by reference, I don't think there's really a lot of
 // benefit to changing it.
 #[allow(clippy::needless_pass_by_value)]
-pub fn play_file_list<T: Iterator<Item = PathBuf>>(
+pub fn play_file_list(
     player: Arc<rodio::Player>,
-    filepaths: Arc<Mutex<T>>,
     song_queue: Arc<Mutex<SongQueue>>,
     command_queue: Arc<PlayerCommandQueue>,
 ) {
@@ -28,8 +27,8 @@ pub fn play_file_list<T: Iterator<Item = PathBuf>>(
     // Not the best code I've written but a little break is fine in a five-line thing I'm sure.
     // Also this reading mutex is mainly used later.
     let reading_mutex = Arc::new(Mutex::new(()));
-    while let Some(filepath) = &filepaths.lock().unwrap().next() {
-        song_queue.lock().unwrap().next();
+    while let Some(filepath) = &song_queue.lock().unwrap().next() {
+        // song_queue.lock().unwrap().next();
         if let Ok(_) = append_next_song(&player, filepath, &reading_mutex) {
             println!("Playing {}", filepath.display());
             break;
@@ -58,7 +57,7 @@ pub fn play_file_list<T: Iterator<Item = PathBuf>>(
         )
     });
 
-    while let Some(filepath) = {filepaths.lock().unwrap().next().clone()} {
+    while let Some(filepath) = {song_queue.lock().unwrap().next().clone()} {
         // player.append(source);
         // player.sleep_until_end();
         // std::thread::spawn(move || play_source(&player_ref, source, &command_queue_ref));
@@ -70,17 +69,19 @@ pub fn play_file_list<T: Iterator<Item = PathBuf>>(
         let reading_mutex_copy = reading_mutex.clone();
         std::thread::spawn(move || append_next_song(&player_copy, &filepath_copy, &reading_mutex_copy));
 
-        wait_for_command(&command_queue, &player);
+        command_queue.take_commands();
+        wait_for_command(&command_queue, player.clone(), reading_mutex.clone());
     }
     // We wait one time at the end
-    wait_for_command(&command_queue, &player);
+    wait_for_command(&command_queue, player.clone(), reading_mutex.clone());
 }
 
-fn wait_for_command(command_queue: &PlayerCommandQueue, player: &Player){
+fn wait_for_command(command_queue: &PlayerCommandQueue, player: Arc<Player>, reading_mutex: Arc<Mutex<()>>){
     // Read commands. If Skip or SongFinished appears, move to the next song.
     // Note that Skip, since it skips one and we only ever have one in the queue,
     // immediately causes the player thread to send a SongFinished event.
     let mut next_song = false;
+    let mut queued_immediate = false;
     while !next_song {
         command_queue.wait_for_command();
         let cmds = command_queue.take_commands();
@@ -98,7 +99,18 @@ fn wait_for_command(command_queue: &PlayerCommandQueue, player: &Player){
                 PlayerCommand::Skip => {
                     player.skip_one();
                 }
-                PlayerCommand::SongFinished => next_song = true,
+                PlayerCommand::SongFinished => {
+                    next_song = true;
+                    if queued_immediate{
+                        player.skip_one();
+                    }
+                },
+                PlayerCommand::QueueImmediate(_) =>{
+                    // let player_copy = player.clone();
+                    // let reading_mutex_copy = reading_mutex.clone();
+                    // std::thread::spawn(move || append_next_song(&player_copy, &path, &reading_mutex_copy));
+                    queued_immediate = true;
+                }
             }
         }
     }
@@ -173,9 +185,9 @@ fn end_song_detector(
         }
         player.sleep_until_end();
         command_queue.add_command(PlayerCommand::SongFinished);
-        if let Some(song) = song_queue.lock().unwrap().next() {
-            println!("Playing {}", song.display());
-        }
+        // if let Some(song) = song_queue.lock().unwrap().next() {
+        //     println!("Playing {}", song.display());
+        // }
     }
 }
 
@@ -186,6 +198,7 @@ pub enum PlayerCommand {
     VolumeUp,
     VolumeDown,
     SongFinished,
+    QueueImmediate(PathBuf),
 }
 
 pub struct PlayerCommandQueue {
@@ -228,9 +241,24 @@ impl PlayerCommandQueue {
 pub struct SongQueue {
     immediate: VecDeque<PathBuf>,
     back: VecDeque<PathBuf>,
+    // Holds the currently-playing song.
+    // If this = None, nothing has been pulled yet,
+    // so it'll be the last thing we pulled.
+    // If this = Some, then something has been pulled,
+    // and a request coming in means it's for the one to play *after* this.
+    currently_playing: Option<PathBuf>,
+    next_playing: NextPlayingStates,
+    last_pull_was_back: bool,
     // names_model: ModelRc<SharedString>,
     // names_rc: Rc<SongNames>,
     names_ui: Option<Weak<AppWindow>>,
+}
+
+#[derive(Debug)]
+pub enum NextPlayingStates{
+    None,
+    Some(PathBuf),
+    JustQueued(PathBuf),
 }
 
 struct SongNames {
@@ -244,6 +272,62 @@ impl Iterator for SongQueue {
 
     fn next(&mut self) -> Option<Self::Item> {
         // Pop the first from the song names.
+        let next = if !self.immediate.is_empty() {
+            self.last_pull_was_back = false;
+            self.immediate.pop_front()
+        } else {
+            self.last_pull_was_back = true;
+            let next = self.back.pop_front();
+            next
+        };
+
+        // println!("\n\nBEFORE:\n\ncurrent: {:?}\nnext: {:?}\nrest: {:?}\nret: {:?}", self.currently_playing, self.next_playing, self.back, next);
+
+        // First pull
+        if self.currently_playing.is_none(){
+            self.currently_playing = next.clone();
+        }
+        // Second pull
+        else if let NextPlayingStates::None = self.next_playing{
+            self.next_playing = if let Some(n) = &next{
+                NextPlayingStates::Some(n.clone())
+            }else{
+                NextPlayingStates::None
+            };
+        }
+        // Last pull was immediate
+        else if let NextPlayingStates::JustQueued(next_p) = &self.next_playing{
+            self.currently_playing = Some(next_p.clone());
+            self.next_playing = NextPlayingStates::None;
+        }
+        // Otherwise
+        else{
+            match &mut self.next_playing{
+                NextPlayingStates::Some(n) => {
+                    if let Some(nxt) = &next{
+                        self.currently_playing = Some(std::mem::replace(n, nxt.clone()));
+                    }else{
+                        self.currently_playing = Some(n.clone());
+                        self.next_playing = NextPlayingStates::None;
+                    };
+                }
+                NextPlayingStates::JustQueued(n) => {
+                    if let Some(nxt) = &next{
+                        self.currently_playing = Some(std::mem::replace(n, nxt.clone()));
+                    }else{
+                        self.currently_playing = Some(n.clone());
+                        self.next_playing = NextPlayingStates::None;
+                    };
+                }
+                NextPlayingStates::None => self.currently_playing = None,
+            }
+            // self.currently_playing = std::mem::replace(&mut self.next_playing, next.clone());
+        }
+
+
+        // println!("\n\nAFTER:\n\ncurrent: {:?}\nnext: {:?}\nrest: {:?}\nret: {:?}", self.currently_playing, self.next_playing, self.back, next);
+        
+
         // Horrible high-coupling nonsense, but it's the only
         // way I've found to modify a Slint model from another thread.
         // Not only that, but *updating* the model didn't work,
@@ -258,14 +342,11 @@ impl Iterator for SongQueue {
                     back: back,
                     notify: ModelNotify::default(),
                 })));
+                println!("Updated songs");
             });
         }
-
-        if !self.immediate.is_empty() {
-            return self.immediate.pop_front();
-        } else {
-            return self.back.pop_front();
-        }
+        
+        next
     }
 }
 
@@ -295,6 +376,9 @@ impl SongQueue {
             SongQueue {
                 immediate: VecDeque::new(),
                 back: VecDeque::from(songs),
+                currently_playing: None,
+                next_playing: NextPlayingStates::None,
+                last_pull_was_back: false,
                 names_ui: ui_weak,
             },
             names_model,
@@ -307,13 +391,19 @@ impl SongQueue {
         RefCell<VecDeque<SharedString>>,
         RefCell<VecDeque<SharedString>>,
     ) {
-        let inner_names = self
+        let mut inner_names = self
             .immediate
             .iter()
             .chain(self.back.iter())
             .filter_map(|path| path.file_name())
             .map(|name| name.to_string_lossy().into_owned().into())
             .collect::<VecDeque<SharedString>>();
+        if let Some(current) = &self.currently_playing{
+            if let NextPlayingStates::Some(next) = &self.next_playing{
+                inner_names.push_front(next.file_name().unwrap_or_default().to_string_lossy().into_owned().into());
+            }
+            inner_names.push_front(current.file_name().unwrap_or_default().to_string_lossy().into_owned().into());
+        }
 
         (RefCell::new(VecDeque::new()), RefCell::new(inner_names))
     }
@@ -334,8 +424,16 @@ impl SongQueue {
     }
 
     pub fn queue_immediate(&mut self, item: PathBuf) {
-        // TODO: Update SongNames
-        self.immediate.push_back(item);
+        self.immediate.push_back(item.clone());
+        if self.last_pull_was_back{
+            if let NextPlayingStates::Some(next) = &self.next_playing && self.last_pull_was_back{
+                self.back.push_front(next.clone());
+                self.next_playing = NextPlayingStates::JustQueued(item.clone());
+            }
+            if let NextPlayingStates::None = &self.next_playing{
+                self.next_playing = NextPlayingStates::JustQueued(item.clone());
+            }
+        }
         self.update_names();
     }
 }

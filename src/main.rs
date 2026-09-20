@@ -91,7 +91,7 @@ fn play_cli(playlist_name: String) {
     let playlist_paths = SongQueue::new(filepaths.clone(), None);
     play_file_list(
         player,
-        Arc::new(Mutex::new(filepaths.into_iter())),
+        // Arc::new(Mutex::new(filepaths.into_iter())),
         Arc::new(Mutex::new(playlist_paths.0)),
         command_queue,
     );
@@ -188,7 +188,28 @@ fn ui_on_play_playlist(
     let visual_song_queue = Arc::new(Mutex::new(visual_song_queue));
     let file_song_queue = Arc::new(Mutex::new(file_song_queue));
 
+    
+
+    // Spawn the playing thread.
+    let command_queue = Arc::new(PlayerCommandQueue::new());
+    {   
+        let command_queue_player = command_queue.clone();
+        let player2 = player.clone();
+        let visual_song_queue_ref = visual_song_queue.clone();
+        let file_song_queue_ref = file_song_queue.clone();
+        std::thread::spawn(move || {
+            play_file_list(
+                player2,
+                // file_song_queue_ref,
+                visual_song_queue_ref,
+                command_queue_player,
+            )
+        });
+    }
+    
+
     {
+        let command_queue_ref = command_queue.clone();
         let ui_ref = ui.as_weak();
         let library_ref = library.clone();
         let visual_song_queue_ref = visual_song_queue.clone();
@@ -197,22 +218,10 @@ fn ui_on_play_playlist(
             let ui = ui_ref.unwrap();
             let _ = library_ref.hide_or_queue(index as usize,
                 &mut visual_song_queue_ref.lock().unwrap(), 
-                &mut file_song_queue_ref.lock().unwrap());
+                &mut file_song_queue_ref.lock().unwrap(),
+                &command_queue_ref);
         });
     }
-
-    // Spawn the playing thread.
-    let command_queue = Arc::new(PlayerCommandQueue::new());
-    let command_queue_player = command_queue.clone();
-    let player2 = player.clone();
-    std::thread::spawn(move || {
-        play_file_list(
-            player2,
-            file_song_queue,
-            visual_song_queue,
-            command_queue_player,
-        )
-    });
 
     // Connect the song model and library to the UI.
     ui.set_songs_for_selected(song_model);
