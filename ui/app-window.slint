@@ -75,6 +75,7 @@ component PlayerControls inherits Rectangle{
     max-height: icon_size;
     min-width: 2*icon_size;
     max-width: 2*icon_size;
+    width: 100%;
 
     callback pause();
     callback skip();
@@ -148,7 +149,7 @@ component PlayingMenu inherits Rectangle{
 }
 
 component PlaylistPlayable inherits Rectangle{
-    width: 90%;
+    // width: 90%;
     background: #f74cf7;
     in property <string> playlist_name;
     callback clicked(string);
