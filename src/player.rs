@@ -1,8 +1,10 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::error::Error;
+use std::fmt::Display;
 use std::fs::File;
 use std::io::BufReader;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
@@ -20,19 +22,32 @@ use crate::ui::AppWindow;
 pub fn play_file_list(
     player: Arc<rodio::Player>,
     song_queue: Arc<Mutex<SongQueue>>,
+    ui_queue: Arc<Mutex<SongQueueOld>>,
     command_queue: Arc<PlayerCommandQueue>,
 ) {
     // Put one song in the queue before the main loop.
     // That way we'll always have two songs in the queue, letting us do gapless. (Hopefully)
     // Not the best code I've written but a little break is fine in a five-line thing I'm sure.
-    // Also this reading mutex is mainly used later.
-    let reading_mutex = Arc::new(Mutex::new(()));
-    while let Some(filepath) = &song_queue.lock().unwrap().next() {
+    while let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()} {
         // song_queue.lock().unwrap().next();
-        if let Ok(_) = append_next_song(&player, filepath, &reading_mutex) {
-            println!("Playing {}", filepath.display());
+        // if let Ok(_) = append_next_song(&player, filepath) {
+        //     println!("Playing {}", filepath.display());
+        //     break;
+        // }
+
+        if let Ok(source) = decode_song(&filepath){
+            let player_copy = player.clone();
+            let cmd_queue_copy = command_queue.clone();
+            player.append(source);
+            std::thread::spawn(move || {
+                player_copy.sleep_until_end();
+                cmd_queue_copy.add_command(PlayerCommand::SongFinished);
+            });
+            {song_queue.lock().unwrap().advance()};
+
             break;
         }
+        {song_queue.lock().unwrap().advance()};
     }
 
     // Create the end song detector thread.
@@ -41,42 +56,61 @@ pub fn play_file_list(
     // Well, now that there's the mutex thing, I could just lock the mutex,
     // spawn the thread, read the thing, and then unlock the mutex.
     // That seems more complicated and messy though.
-    let player_ref = player.clone();
-    let command_queue_ref = command_queue.clone();
-    let finished_playing = Arc::new(true);
-    let finished_playing_ref = finished_playing.clone();
-    let reading_mutex_ref = reading_mutex.clone();
-    let song_queue_ref = song_queue.clone();
-    std::thread::spawn(move || {
-        end_song_detector(
-            &player_ref,
-            &command_queue_ref,
-            song_queue_ref,
-            &finished_playing_ref,
-            &reading_mutex_ref,
-        )
-    });
+    // let player_ref = player.clone();
+    // let command_queue_ref = command_queue.clone();
+    // let finished_playing = Arc::new(true);
+    // let finished_playing_ref = finished_playing.clone();
+    // let reading_mutex_ref = reading_mutex.clone();
+    // let song_queue_ref = song_queue.clone();
+    // std::thread::spawn(move || {
+    //     end_song_detector(
+    //         &player_ref,
+    //         &command_queue_ref,
+    //         song_queue_ref,
+    //         &finished_playing_ref,
+    //         &reading_mutex_ref,
+    //     )
+    // });
 
-    while let Some(filepath) = {song_queue.lock().unwrap().next().clone()} {
-        // player.append(source);
-        // player.sleep_until_end();
-        // std::thread::spawn(move || play_source(&player_ref, source, &command_queue_ref));
-        // if let Err(_) = append_next_song(&player, filepath) {
-        //     continue;
-        // }
-        let filepath_copy = filepath.clone();
-        let player_copy = player.clone();
-        let reading_mutex_copy = reading_mutex.clone();
-        std::thread::spawn(move || append_next_song(&player_copy, &filepath_copy, &reading_mutex_copy));
+    let mut last_result = WaitResult::Ok;
 
+    while last_result != WaitResult::Stop {
+        // If the last one was an immediate queue, we flushed the queue,
+        // so we need to queue another.
+        if last_result == WaitResult::QueuedImmediate{
+            if let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()}{
+                println!("queuing {}", filepath.display());
+                // let filepath_copy = filepath.clone();
+                let player_copy = player.clone();
+                let cmd_queue_copy = command_queue.clone();
+                let source = decode_song(&filepath).unwrap();
+                std::thread::spawn(move || append_and_wait(&player_copy, source, &cmd_queue_copy));
+            }
+            song_queue.lock().unwrap().advance();
+        }
+
+        // Only append & wait if there's another song in the queue.
+        // Otherwise, we go straight to waiting for commands.
+        if let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()}{
+            println!("queuing {}", filepath.display());
+            // let filepath_copy = filepath.clone();
+            let player_copy = player.clone();
+            let cmd_queue_copy = command_queue.clone();
+            let source = decode_song(&filepath).unwrap();
+            std::thread::spawn(move || append_and_wait(&player_copy, source, &cmd_queue_copy));
+        }
+        
         command_queue.take_commands();
-        wait_for_command(&command_queue, player.clone(), reading_mutex.clone());
+        last_result = wait_for_command(&command_queue, &player, &song_queue);
+        // {song_queue.lock().unwrap().advance()};
     }
-    // We wait one time at the end
-    wait_for_command(&command_queue, player.clone(), reading_mutex.clone());
+    // // We wait one time at the end
+    // wait_for_command(&command_queue, player.clone());
 }
 
-fn wait_for_command(command_queue: &PlayerCommandQueue, player: Arc<Player>, reading_mutex: Arc<Mutex<()>>){
+// Returns true if we should stop playing.
+fn wait_for_command(command_queue: &PlayerCommandQueue, player: &Player, song_queue: &Mutex<SongQueue>) -> WaitResult{
+    use WaitResult::{Stop, QueuedImmediate, Ok};
     // Read commands. If Skip or SongFinished appears, move to the next song.
     // Note that Skip, since it skips one and we only ever have one in the queue,
     // immediately causes the player thread to send a SongFinished event.
@@ -103,17 +137,35 @@ fn wait_for_command(command_queue: &PlayerCommandQueue, player: Arc<Player>, rea
                     next_song = true;
                     if queued_immediate{
                         player.skip_one();
+                    }else{
+                        song_queue.lock().unwrap().advance();
                     }
                 },
-                PlayerCommand::QueueImmediate(_) =>{
+                PlayerCommand::QueueImmediate =>{
                     // let player_copy = player.clone();
                     // let reading_mutex_copy = reading_mutex.clone();
                     // std::thread::spawn(move || append_next_song(&player_copy, &path, &reading_mutex_copy));
                     queued_immediate = true;
+                },
+                PlayerCommand::Stop => {
+                    return Stop;
                 }
             }
         }
     }
+
+    if queued_immediate{
+        QueuedImmediate
+    }else{
+        Ok
+    }
+}
+
+#[derive(PartialEq)]
+enum WaitResult{
+    Stop,
+    QueuedImmediate,
+    Ok,
 }
 
 fn append_songs_thread(){
@@ -124,17 +176,17 @@ fn append_songs_thread(){
     //   Append the song to the player. 
 }
 
-fn append_next_song(player: &rodio::Player, filepath: &PathBuf, reading_mutex: &Mutex<()>) -> Result<(), ()> {
-    // Lock the mutex.
-    let _lock = reading_mutex.lock();
+// fn append_next_song(player: &rodio::Player, source: Decoder<BufReader<File>>) {
+//     // Play file
+//     player.append(source);
+// }
 
+fn decode_song(filepath: &Path) -> Result<Decoder<BufReader<File>>, DecodingError>{
     // Open file.
-    // Either open file as a BufReader, or skip to the next one if it fails.
     let file = match File::open(filepath) {
         Ok(f) => BufReader::new(f),
         Err(err) => {
-            eprintln!("Error reading file {}: {err}", filepath.display());
-            return Err(());
+            return Err(DecodingError::FileError(err));
         }
     };
 
@@ -147,13 +199,39 @@ fn append_next_song(player: &rodio::Player, filepath: &PathBuf, reading_mutex: &
         Ok(s) => s,
         Err(err) => {
             eprintln!("Error reading file {}: {err}", filepath.display());
-            return Err(());
+            return Err(DecodingError::DecodingError(err));
         }
     };
 
-    // Play file
+    Ok(source)
+}
+
+#[derive(Debug)]
+enum DecodingError{
+    FileError(std::io::Error),
+    DecodingError(rodio::decoder::DecoderError),
+}
+
+impl Error for DecodingError{}
+impl Display for DecodingError{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self{
+            Self::FileError(err) => write!(f, "{err}"),
+            Self::DecodingError(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+enum SongAppenderCmdQueue{
+
+}
+
+fn append_and_wait(player: &rodio::Player, source: Decoder<BufReader<File>>, cmd_queue: &PlayerCommandQueue){
     player.append(source);
-    Ok(())
+    // println!("appended {}", filepath.display());
+    player.sleep_until_end();
+    // println!("finished eepin {}", filepath.display());
+    cmd_queue.add_command(PlayerCommand::SongFinished);
 }
 
 /// Meant to run in a separate thread.
@@ -171,7 +249,7 @@ fn play_source<T: Source + Send + 'static>(
 fn end_song_detector(
     player: &rodio::Player,
     command_queue: &PlayerCommandQueue,
-    song_queue: Arc<Mutex<SongQueue>>,
+    song_queue: Arc<Mutex<SongQueueOld>>,
     keep_detecting: &bool,
     sync_mutex: &Mutex<()>,
 ) {
@@ -198,7 +276,8 @@ pub enum PlayerCommand {
     VolumeUp,
     VolumeDown,
     SongFinished,
-    QueueImmediate(PathBuf),
+    QueueImmediate,
+    Stop,
 }
 
 pub struct PlayerCommandQueue {
@@ -238,7 +317,7 @@ impl PlayerCommandQueue {
     }
 }
 
-pub struct SongQueue {
+pub struct SongQueueOld {
     immediate: VecDeque<PathBuf>,
     back: VecDeque<PathBuf>,
     // Holds the currently-playing song.
@@ -267,7 +346,7 @@ struct SongNames {
     notify: slint::ModelNotify,
 }
 
-impl Iterator for SongQueue {
+impl Iterator for SongQueueOld {
     type Item = PathBuf;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -342,7 +421,6 @@ impl Iterator for SongQueue {
                     back: back,
                     notify: ModelNotify::default(),
                 })));
-                println!("Updated songs");
             });
         }
         
@@ -350,11 +428,11 @@ impl Iterator for SongQueue {
     }
 }
 
-impl SongQueue {
+impl SongQueueOld {
     pub fn new(
         songs: Vec<PathBuf>,
         ui_weak: Option<Weak<AppWindow>>,
-    ) -> (SongQueue, ModelRc<SharedString>) {
+    ) -> (SongQueueOld, ModelRc<SharedString>) {
         // Construct the list of song names.
         // We use lossy conversion from OSString here;
         // a malformed song name really isn't a big deal.
@@ -373,7 +451,7 @@ impl SongQueue {
         let names_model = ModelRc::from(names_rc.clone());
 
         (
-            SongQueue {
+            SongQueueOld {
                 immediate: VecDeque::new(),
                 back: VecDeque::from(songs),
                 currently_playing: None,
@@ -471,5 +549,60 @@ impl SongNames {
             self.back.borrow_mut().pop_front();
         }
         self.notify.reset();
+    }
+}
+
+
+// The song queue for the backend.
+pub struct SongQueue{
+    normal_queue: VecDeque<PathBuf>,
+    immediate_queue: VecDeque<PathBuf>,
+}
+
+impl SongQueue{
+    pub fn new(songs: Vec<PathBuf>) -> SongQueue{
+        SongQueue{
+            normal_queue: songs.into(),
+            immediate_queue: VecDeque::new(),
+        }
+    }
+
+    fn peek(&self) -> Option<&PathBuf>{
+        println!("{:?} {:?}", self.normal_queue, self.immediate_queue);
+        if self.immediate_queue.is_empty(){
+            self.normal_queue.front()
+        }else{
+            self.immediate_queue.front()
+        }
+    }
+
+    fn advance(&mut self){
+        if self.immediate_queue.is_empty(){
+            self.normal_queue.pop_front();
+        }else{
+            self.immediate_queue.pop_front();
+        }
+    }
+
+    pub fn queue(&mut self, path: PathBuf){
+        self.immediate_queue.push_back(path);
+    }
+}
+
+// The visual representation for the song list in the UI.
+pub struct SongModelUI{
+    current_song: Rc<RefCell<SharedString>>,
+    immediate_queued: Rc<RefCell<VecDeque<SharedString>>>,
+    normal_queued: Rc<RefCell<VecDeque<SharedString>>>,
+}
+
+impl SongModelUI{
+    /// Returns in the order (handle for this, ) 
+    fn new(songs: &Vec<PathBuf>) -> (SongModelUI, SharedString, ModelRc<SharedString>, ModelRc<SharedString>){
+        todo!()
+    }
+
+    fn song_finished(&mut self){
+        todo!()
     }
 }

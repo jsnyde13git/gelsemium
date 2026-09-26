@@ -10,7 +10,7 @@ use std::process::exit;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use rust_music_player::player::{PlayerCommand, PlayerCommandQueue, SongQueue, play_file_list};
+use rust_music_player::player::{PlayerCommand, PlayerCommandQueue, SongQueue, SongQueueOld, play_file_list};
 use rust_music_player::playlist_parser::parse_playlists;
 use rust_music_player::playlist_parser::{ExpandDirOptions, get_playlist_filepaths};
 use rust_music_player::ui::{AppWindow, LibraryElem};
@@ -88,13 +88,14 @@ fn play_cli(playlist_name: String) {
     println!("p: Pause/Play");
 
     let filepaths = playlist.into_iter().map(|x| x.1).collect::<Vec<PathBuf>>();
-    let playlist_paths = SongQueue::new(filepaths.clone(), None);
-    play_file_list(
-        player,
-        // Arc::new(Mutex::new(filepaths.into_iter())),
-        Arc::new(Mutex::new(playlist_paths.0)),
-        command_queue,
-    );
+    let playlist_paths = SongQueueOld::new(filepaths.clone(), None);
+    todo!()
+    // play_file_list(
+    //     player,
+    //     // Arc::new(Mutex::new(filepaths.into_iter())),
+    //     Arc::new(Mutex::new(playlist_paths.0)),
+    //     command_queue,
+    // );
 }
 
 fn play_gui() -> Result<(), PlatformError> {
@@ -183,11 +184,11 @@ fn ui_on_play_playlist(
         .into_iter()
         .map(|x| x.1.clone())
         .collect::<Vec<PathBuf>>();
-    let (visual_song_queue, song_model) = SongQueue::new(filepaths.clone(), Some(ui.as_weak()));
-    let (file_song_queue, _) = SongQueue::new(filepaths.clone(), None);
+    let (visual_song_queue, song_model) = SongQueueOld::new(filepaths.clone(), Some(ui.as_weak()));
+    let (file_song_queue_old, _) = SongQueueOld::new(filepaths.clone(), None);
     let visual_song_queue = Arc::new(Mutex::new(visual_song_queue));
-    let file_song_queue = Arc::new(Mutex::new(file_song_queue));
-
+    let file_song_queue_old = Arc::new(Mutex::new(file_song_queue_old));
+    let song_queue = Arc::new(Mutex::new(SongQueue::new(filepaths.clone())));
     
 
     // Spawn the playing thread.
@@ -196,11 +197,13 @@ fn ui_on_play_playlist(
         let command_queue_player = command_queue.clone();
         let player2 = player.clone();
         let visual_song_queue_ref = visual_song_queue.clone();
-        let file_song_queue_ref = file_song_queue.clone();
+        let file_song_queue_ref = file_song_queue_old.clone();
+        let song_queue_ref = song_queue.clone();
         std::thread::spawn(move || {
             play_file_list(
                 player2,
                 // file_song_queue_ref,
+                song_queue_ref,
                 visual_song_queue_ref,
                 command_queue_player,
             )
@@ -213,12 +216,13 @@ fn ui_on_play_playlist(
         let ui_ref = ui.as_weak();
         let library_ref = library.clone();
         let visual_song_queue_ref = visual_song_queue.clone();
-        let file_song_queue_ref = file_song_queue.clone();
+        let file_song_queue_ref = file_song_queue_old.clone();
+        let song_queue_ref = song_queue.clone();
         ui.on_library_elem_clicked(move |index| {
             let ui = ui_ref.unwrap();
             let _ = library_ref.hide_or_queue(index as usize,
                 &mut visual_song_queue_ref.lock().unwrap(), 
-                &mut file_song_queue_ref.lock().unwrap(),
+                &mut song_queue_ref.lock().unwrap(),
                 &command_queue_ref);
         });
     }

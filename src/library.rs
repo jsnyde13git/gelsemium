@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, io, path::PathBuf};
 
 use slint::{Model, ModelNotify, SharedString};
-use crate::{player::{PlayerCommandQueue, SongQueue}, ui::LibraryElem};
+use crate::{player::{PlayerCommandQueue, SongQueue, SongQueueOld}, ui::LibraryElem};
 
 /// Slint-compatible element for the Song Library.
 /// Can be either a folder or a song.
@@ -295,7 +295,7 @@ impl Library {
         return result;
     }
 
-    pub fn hide_or_queue(&self, index: usize, visual_queue: &mut SongQueue, play_queue: &mut SongQueue, command_queue: &PlayerCommandQueue) -> Result<(), ()>{
+    pub fn hide_or_queue(&self, index: usize, visual_queue: &mut SongQueueOld, play_queue: &mut SongQueue, command_queue: &PlayerCommandQueue) -> Result<(), ()>{
         let result = if let Some(elem) = self.contents.borrow_mut().find_mut(index, 0){
             match elem {
                 InternalLibraryElem::Folder(folder) => {
@@ -305,8 +305,8 @@ impl Library {
                 },
                 InternalLibraryElem::Song(song) => {
                     visual_queue.queue_immediate(song.path.clone());
-                    play_queue.queue_immediate(song.path.clone());
-                    command_queue.add_command(crate::player::PlayerCommand::QueueImmediate(song.path.clone()));
+                    play_queue.queue(song.path.clone());
+                    command_queue.add_command(crate::player::PlayerCommand::QueueImmediate);
                     Ok(())
                 },
             }
