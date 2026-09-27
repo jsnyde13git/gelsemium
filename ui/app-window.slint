@@ -49,24 +49,70 @@ component SongLibrary inherits Rectangle{
 
 // Queue of currently-playing songs.
 component SongQueue inherits Rectangle{
-    in property<[string]> song_names: [
+    in property<[string]> normal_song_queue: [
          "examplesong1", 
          "examplesong2", 
          "examplesong3",
          "examplesong4",
     ];
-    background: #672b78;
+    in property<[string]> immediate_queue: [
+        "examplesong_a",
+        "examplesong_b",
+    ];
+    in-out property<string> currently_playing: "current_playing";
+
+    in property<brush> queue_background: #672b78;
+
+    callback song_finished() -> string;
+    callback notify_song_finished();
+    notify_song_finished => {
+        currently_playing = song_finished();
+    }
+
+    background: #f675f6;
     property<length> offset_per_nest: 10px;
 
-    ListView {
-        for song[i] in song_names: HorizontalBox{
-            alignment: start;
-            Text{
-                text: song;
-                horizontal-alignment: start;
+    VerticalBox{
+        // Currently-playing song.
+        Rectangle{
+            background: queue_background;
+            HorizontalBox{
+                alignment: start;
+                Text{
+                    text: currently_playing;
+                    horizontal-alignment: start;
+                }
             }
         }
-    }   
+
+        // User-constructed queue.
+        if immediate_queue.length > 0: Rectangle{
+            background: queue_background;
+            ListView {
+                for song[i] in immediate_queue: HorizontalBox{
+                    alignment: start;
+                    Text{
+                        text: song;
+                        horizontal-alignment: start;
+                    }
+                }
+            }   
+        }
+
+        // Playlist.
+        Rectangle{
+            background: queue_background;
+            ListView {
+                for song[i] in normal_song_queue: HorizontalBox{
+                    alignment: start;
+                    Text{
+                        text: song;
+                        horizontal-alignment: start;
+                    }
+                }
+            }   
+        }
+    }
 }
 
 component PlayerControls inherits Rectangle{
@@ -108,16 +154,26 @@ component PlayerControls inherits Rectangle{
 
 // Component that displays when a playlist is being played currently.
 component PlayingMenu inherits Rectangle{
-    in property<[string]> song_names: [
+    in property<[string]> playlist_queue: [
          "examplesong1", 
          "examplesong2", 
          "examplesong3",
          "examplesong4",
     ];
-    in property<[LibraryElem]> library;
+    in property<[string]> user_queue: [
+        "examplesonga", 
+        "examplesongb", 
+        "examplesongc",
+        "examplesongd",
+    ];
+    in property<string> currently_playing: "current_playing";
+    
     callback skip();
     callback pause();
+
+    in property<[LibraryElem]> library;
     callback library_elem_clicked(int);
+
     background: #f675f6;
 
     HorizontalBox {
@@ -134,8 +190,10 @@ component PlayingMenu inherits Rectangle{
                 skip => skip();
                 pause => pause();
             }
-            SongQueue{
-                song_names: song_names;
+            songqueue := SongQueue{
+                normal_song_queue: playlist_queue;
+                immediate_queue: user_queue;
+                currently_playing: currently_playing;   
             }
         }
         
@@ -205,7 +263,9 @@ export component AppWindow inherits Window {
     callback volume_down();
     callback skip();
     callback library_elem_clicked(int);
-    in property <[string]> songs_for_selected;
+    in property <[string]> playlist_queue;
+    in property <[string]> user_queue;
+    in property <string> currently_playing;
     in property <[LibraryElem]> library;
 
     // For the PlaylistSelect state.
@@ -226,7 +286,9 @@ export component AppWindow inherits Window {
         };
     }
     if state == ScreenState.playing: PlayingMenu{
-        song_names: songs_for_selected;
+        playlist_queue: playlist_queue;
+        user_queue: user_queue;
+        currently_playing: currently_playing;
         library: library;
         skip => skip();
         pause => pause();

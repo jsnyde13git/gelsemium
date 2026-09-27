@@ -1,5 +1,5 @@
 use rodio::Player;
-use slint::{ComponentHandle, ModelRc, PlatformError, SharedString, VecModel, Weak};
+use slint::{ComponentHandle, Model, ModelRc, PlatformError, SharedString, VecModel, Weak};
 use std::collections::HashMap;
 use std::env;
 use std::error::Error;
@@ -10,7 +10,7 @@ use std::process::exit;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use rust_music_player::player::{PlayerCommand, PlayerCommandQueue, SongQueue, SongQueueOld, play_file_list};
+use rust_music_player::player::{PlayerCommand, PlayerCommandQueue, SongModelUI, SongQueue, SongQueueOld, VecDequeModel, play_file_list};
 use rust_music_player::playlist_parser::parse_playlists;
 use rust_music_player::playlist_parser::{ExpandDirOptions, get_playlist_filepaths};
 use rust_music_player::ui::{AppWindow, LibraryElem};
@@ -184,9 +184,10 @@ fn ui_on_play_playlist(
         .into_iter()
         .map(|x| x.1.clone())
         .collect::<Vec<PathBuf>>();
-    let (visual_song_queue, song_model) = SongQueueOld::new(filepaths.clone(), Some(ui.as_weak()));
+    // let (visual_song_queue, song_model) = SongQueueOld::new(filepaths.clone(), Some(ui.as_weak()));
     let (file_song_queue_old, _) = SongQueueOld::new(filepaths.clone(), None);
-    let visual_song_queue = Arc::new(Mutex::new(visual_song_queue));
+    let (visual_song_queue, current_song, immediate_queue_model, playlist_queue_model) = SongModelUI::new(&filepaths);
+    let visual_song_queue = Arc::new(visual_song_queue);
     let file_song_queue_old = Arc::new(Mutex::new(file_song_queue_old));
     let song_queue = Arc::new(Mutex::new(SongQueue::new(filepaths.clone())));
     
@@ -194,6 +195,32 @@ fn ui_on_play_playlist(
     // Spawn the playing thread.
     let command_queue = Arc::new(PlayerCommandQueue::new());
     {   
+        let visual_ref = visual_song_queue.clone();
+        let ui_ref = ui.as_weak();
+        let song_finished_closure = move ||{
+            let _ = ui_ref.upgrade_in_event_loop(move |ui|{
+                println!("running in event loop");
+                let currently_playing = ui.get_currently_playing();
+                let playlist_queue_binding = ui.get_playlist_queue();
+                let playlist_queue_maybe = playlist_queue_binding.as_any().downcast_ref::<VecDequeModel<SharedString>>();
+                let user_queue_binding =  ui.get_user_queue();
+                let user_queue_maybe = user_queue_binding.as_any().downcast_ref::<VecDequeModel<SharedString>>();
+                if let (Some(playlist_queue), Some(user_queue)) = (playlist_queue_maybe, user_queue_maybe){
+                    let current_song_maybe = if user_queue.is_empty(){
+                        playlist_queue.pop_front()
+                    }else{
+                        user_queue.pop_front()
+                    };
+                    // let v = playlist_queue.pop_front();
+                    if let Some(val) = current_song_maybe{
+                        ui.set_currently_playing(val);
+                    }
+                }else{
+                    println!("downcast failed");
+                }
+            });
+        };
+        
         let command_queue_player = command_queue.clone();
         let player2 = player.clone();
         let visual_song_queue_ref = visual_song_queue.clone();
@@ -204,7 +231,8 @@ fn ui_on_play_playlist(
                 player2,
                 // file_song_queue_ref,
                 song_queue_ref,
-                visual_song_queue_ref,
+                // visual_song_queue_ref,
+                &song_finished_closure,
                 command_queue_player,
             )
         });
@@ -215,20 +243,33 @@ fn ui_on_play_playlist(
         let command_queue_ref = command_queue.clone();
         let ui_ref = ui.as_weak();
         let library_ref = library.clone();
-        let visual_song_queue_ref = visual_song_queue.clone();
+        let user_queue_ref = immediate_queue_model.clone();
+        // let user_queue_ref = user_queue_binding.as_any().downcast_ref::<VecDequeModel<SharedString>>().unwrap();
         let file_song_queue_ref = file_song_queue_old.clone();
         let song_queue_ref = song_queue.clone();
         ui.on_library_elem_clicked(move |index| {
             let ui = ui_ref.unwrap();
+            #[allow(clippy::unwrap_used)]
+            let user_queue = user_queue_ref.as_any().downcast_ref::<VecDequeModel<SharedString>>().unwrap();
             let _ = library_ref.hide_or_queue(index as usize,
-                &mut visual_song_queue_ref.lock().unwrap(), 
+                // &mut visual_song_queue_ref.lock().unwrap(), 
+                &user_queue,
                 &mut song_queue_ref.lock().unwrap(),
                 &command_queue_ref);
         });
     }
 
+    // Connect the UI song queue stuff.
+    {
+        ui.set_currently_playing(current_song);
+        ui.set_playlist_queue(playlist_queue_model);
+        ui.set_user_queue(immediate_queue_model);
+    }
+    {
+    }
+
     // Connect the song model and library to the UI.
-    ui.set_songs_for_selected(song_model);
+    // ui.set_playlist_queue(song_model);
     ui.set_library(library_model);
 
     // Connect the command queue to the UI.

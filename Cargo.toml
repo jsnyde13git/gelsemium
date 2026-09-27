@@ -19,6 +19,6 @@ string_slice = "warn"
 panic = "warn"
 panic_in_result_fn = "warn"
 exit = "warn"
-todo_used = "warn"
+todo = "warn"
 # IMO this lint often makes code *less* readable.
 needless_return = {level = "allow", priority = 1}

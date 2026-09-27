@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use rodio::decoder::DecoderBuilder;
 use rodio::{Decoder, Player, Source};
-use slint::{Model, ModelNotify, ModelRc, SharedString, Weak};
+use slint::{Model, ModelNotify, ModelRc, SharedString, VecModel, Weak};
 
 use crate::ui::AppWindow;
 
@@ -22,7 +22,8 @@ use crate::ui::AppWindow;
 pub fn play_file_list(
     player: Arc<rodio::Player>,
     song_queue: Arc<Mutex<SongQueue>>,
-    ui_queue: Arc<Mutex<SongQueueOld>>,
+    // ui_queue: Arc<Mutex<SongQueueOld>>,
+    song_finished: &dyn Fn() -> (),
     command_queue: Arc<PlayerCommandQueue>,
 ) {
     // Put one song in the queue before the main loop.
@@ -48,6 +49,7 @@ pub fn play_file_list(
             break;
         }
         {song_queue.lock().unwrap().advance()};
+        // song_finished();
     }
 
     // Create the end song detector thread.
@@ -79,7 +81,6 @@ pub fn play_file_list(
         // so we need to queue another.
         if last_result == WaitResult::QueuedImmediate{
             if let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()}{
-                println!("queuing {}", filepath.display());
                 // let filepath_copy = filepath.clone();
                 let player_copy = player.clone();
                 let cmd_queue_copy = command_queue.clone();
@@ -87,12 +88,12 @@ pub fn play_file_list(
                 std::thread::spawn(move || append_and_wait(&player_copy, source, &cmd_queue_copy));
             }
             song_queue.lock().unwrap().advance();
+            song_finished();
         }
 
         // Only append & wait if there's another song in the queue.
         // Otherwise, we go straight to waiting for commands.
         if let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()}{
-            println!("queuing {}", filepath.display());
             // let filepath_copy = filepath.clone();
             let player_copy = player.clone();
             let cmd_queue_copy = command_queue.clone();
@@ -100,8 +101,9 @@ pub fn play_file_list(
             std::thread::spawn(move || append_and_wait(&player_copy, source, &cmd_queue_copy));
         }
         
+        // song_finished();
         command_queue.take_commands();
-        last_result = wait_for_command(&command_queue, &player, &song_queue);
+        last_result = wait_for_command(&command_queue, &player, &song_queue, song_finished);
         // {song_queue.lock().unwrap().advance()};
     }
     // // We wait one time at the end
@@ -109,7 +111,7 @@ pub fn play_file_list(
 }
 
 // Returns true if we should stop playing.
-fn wait_for_command(command_queue: &PlayerCommandQueue, player: &Player, song_queue: &Mutex<SongQueue>) -> WaitResult{
+fn wait_for_command(command_queue: &PlayerCommandQueue, player: &Player, song_queue: &Mutex<SongQueue>, song_finished: &dyn Fn() -> ()) -> WaitResult{
     use WaitResult::{Stop, QueuedImmediate, Ok};
     // Read commands. If Skip or SongFinished appears, move to the next song.
     // Note that Skip, since it skips one and we only ever have one in the queue,
@@ -139,6 +141,7 @@ fn wait_for_command(command_queue: &PlayerCommandQueue, player: &Player, song_qu
                         player.skip_one();
                     }else{
                         song_queue.lock().unwrap().advance();
+                        song_finished();
                     }
                 },
                 PlayerCommand::QueueImmediate =>{
@@ -414,9 +417,9 @@ impl Iterator for SongQueueOld {
         if let Some(ui) = &self.names_ui {
             let (immediate, back) = self.new_model();
             let _ = ui.upgrade_in_event_loop(move |ui| {
-                // I tried doing the downcast thing, but ui.get_songs_for_selected()
+                // I tried doing the downcast thing, but ui.get_playlist_queue()
                 // didn't want to downcast into SongNames, so it didn't really work.
-                ui.set_songs_for_selected(ModelRc::new(Rc::new(SongNames {
+                ui.set_playlist_queue(ModelRc::new(Rc::new(SongNames {
                     immediate: immediate,
                     back: back,
                     notify: ModelNotify::default(),
@@ -490,9 +493,9 @@ impl SongQueueOld {
         if let Some(ui) = &self.names_ui {
             let (immediate, back) = self.new_model();
             let _ = ui.upgrade_in_event_loop(move |ui| {
-                // I tried doing the downcast thing, but ui.get_songs_for_selected()
+                // I tried doing the downcast thing, but ui.get_playlist_queue()
                 // didn't want to downcast into SongNames, so it didn't really work.
-                ui.set_songs_for_selected(ModelRc::new(Rc::new(SongNames {
+                ui.set_playlist_queue(ModelRc::new(Rc::new(SongNames {
                     immediate: immediate,
                     back: back,
                     notify: ModelNotify::default(),
@@ -568,7 +571,6 @@ impl SongQueue{
     }
 
     fn peek(&self) -> Option<&PathBuf>{
-        println!("{:?} {:?}", self.normal_queue, self.immediate_queue);
         if self.immediate_queue.is_empty(){
             self.normal_queue.front()
         }else{
@@ -591,18 +593,108 @@ impl SongQueue{
 
 // The visual representation for the song list in the UI.
 pub struct SongModelUI{
-    current_song: Rc<RefCell<SharedString>>,
-    immediate_queued: Rc<RefCell<VecDeque<SharedString>>>,
-    normal_queued: Rc<RefCell<VecDeque<SharedString>>>,
+    current_song: Option<SharedString>,
+    immediate_queue: Rc<VecDequeModel<SharedString>>,
+    playlist_queue: Rc<VecDequeModel<SharedString>>,
 }
 
 impl SongModelUI{
-    /// Returns in the order (handle for this, ) 
-    fn new(songs: &Vec<PathBuf>) -> (SongModelUI, SharedString, ModelRc<SharedString>, ModelRc<SharedString>){
-        todo!()
+    /// Returns in the order (handle for this, current_song, immediate_queue, playlist_queue) 
+    pub fn new(songs: &[PathBuf]) -> (SongModelUI, SharedString, ModelRc<SharedString>, ModelRc<SharedString>){
+        let current_song: SharedString = songs[0]
+            .file_name()
+            .map(|s| s.to_string_lossy())
+            .unwrap_or("Error: couldn't read filename".into())
+            .into_owned()
+            .into();
+        println!("{songs:?}");
+
+        let playlist_queue: Rc<VecDequeModel<SharedString>> =
+            Rc::new(
+                VecDequeModel::new(
+                    songs[1..].iter()
+                    .map(|path| path
+                        .file_name()
+                        .map(|s| s.to_string_lossy())
+                        .unwrap_or("Error: couldn't read filename".into())
+                        .into_owned()
+                        .into())
+                    .collect()
+                )
+            );
+
+        let playlist_model = ModelRc::from(playlist_queue.clone());
+
+        let immediate_queue = Rc::new(VecDequeModel::new(VecDeque::new()));
+        let immediate_model = ModelRc::from(immediate_queue.clone());
+
+        (
+            SongModelUI{
+                current_song: Some(current_song.clone()),
+                playlist_queue,
+                immediate_queue
+            },
+            current_song,
+            immediate_model,
+            playlist_model,
+        )
     }
 
-    fn song_finished(&mut self){
-        todo!()
+    // pub fn song_finished(&mut self) -> Option<SharedString>{
+    //     if self.immediate_queue.is_empty(){
+    //         self.current_song = self.playlist_queue.pop_front();
+    //     }else{
+    //         self.current_song = self.immediate_queue.pop_front();
+    //     }
+    //     self.current_song.clone()
+    // }
+}
+
+pub struct VecDequeModel<T>{
+    queue: RefCell<VecDeque<T>>,
+    notify: ModelNotify,
+}
+
+impl<T> VecDequeModel<T>{
+    pub fn new(data: VecDeque<T>) -> VecDequeModel<T>{
+        VecDequeModel{
+            queue: RefCell::new(data),
+            notify: ModelNotify::default()
+        }
     }
+
+    pub fn pop_front(&self) -> Option<T>{
+        let data = self.queue.borrow_mut().pop_front();
+        self.notify.reset();
+        data
+    }
+
+    pub fn push_back(&self, data: T){
+        self.queue.borrow_mut().push_back(data);
+        // TODO check if this works
+        // self.notify.row_added(self.queue.borrow().len(), 1);
+        self.notify.reset();
+    }
+
+    pub fn is_empty(&self) -> bool{
+        self.queue.borrow().len() == 0
+    }
+}
+
+impl Model for VecDequeModel<SharedString>{
+    type Data = SharedString;
+
+    fn row_count(&self) -> usize {
+        self.queue.borrow().len()
+    }
+
+    fn row_data(&self, row: usize) -> Option<Self::Data> {
+        self.queue.borrow().get(row).cloned()
+    }
+
+    fn model_tracker(&self) -> &dyn slint::ModelTracker {
+        &self.notify
+    }
+
+    fn as_any(&self) -> &dyn core::any::Any { self }
 }
