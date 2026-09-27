@@ -607,7 +607,6 @@ impl SongModelUI{
             .unwrap_or("Error: couldn't read filename".into())
             .into_owned()
             .into();
-        println!("{songs:?}");
 
         let playlist_queue: Rc<VecDequeModel<SharedString>> =
             Rc::new(

@@ -199,7 +199,6 @@ fn ui_on_play_playlist(
         let ui_ref = ui.as_weak();
         let song_finished_closure = move ||{
             let _ = ui_ref.upgrade_in_event_loop(move |ui|{
-                println!("running in event loop");
                 let currently_playing = ui.get_currently_playing();
                 let playlist_queue_binding = ui.get_playlist_queue();
                 let playlist_queue_maybe = playlist_queue_binding.as_any().downcast_ref::<VecDequeModel<SharedString>>();
@@ -216,7 +215,7 @@ fn ui_on_play_playlist(
                         ui.set_currently_playing(val);
                     }
                 }else{
-                    println!("downcast failed");
+                    eprintln!("downcast failed");
                 }
             });
         };
