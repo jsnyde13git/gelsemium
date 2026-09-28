@@ -1,21 +1,20 @@
 use rodio::Player;
-use slint::{ComponentHandle, Model, ModelRc, PlatformError, SharedString, VecModel, Weak};
+use slint::{ComponentHandle, Model, ModelRc, PlatformError, SharedString, Weak};
 use std::collections::HashMap;
 use std::env::{self, home_dir};
 use std::error::Error;
-use std::f64::consts::E;
 use std::fs::{File, create_dir_all};
 use std::io::{self};
-use std::iter::{Iterator, zip};
+use std::iter::{Iterator};
 use std::path::PathBuf;
 use std::process::exit;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use rust_music_player::player::{PlayerCommand, PlayerCommandQueue, SongModelUI, SongQueue, SongQueueOld, VecDequeModel, play_file_list};
+use rust_music_player::player::{PlayerCommand, PlayerCommandQueue, SongModelUI, SongQueue, VecDequeModel, play_file_list};
 use rust_music_player::playlist_parser::parse_playlists;
 use rust_music_player::playlist_parser::{ExpandDirOptions, get_playlist_filepaths};
-use rust_music_player::ui::{AppWindow, LibraryElem};
+use rust_music_player::ui::{AppWindow};
 use rust_music_player::library::Library;
 
 fn main() {
@@ -33,7 +32,7 @@ fn main() {
         Some(s) if s == "play" => {
             // Play from the CLI.
             let playlist_name = args.collect::<Vec<String>>().join(" ");
-            play_cli(playlist_name);
+            play_cli(&playlist_name);
         }
         Some(s) if s == "help" => {
             println!("Valid arguments are:");
@@ -51,7 +50,7 @@ fn main() {
     }
 }
 
-fn play_cli(playlist_name: String) {
+fn play_cli(playlist_name: &String) {
     // let playlists_maybe = read_playlists();
     // if let Err(err) = playlists_maybe{
     //     eprintln!("Error reading playlists: {err}");
@@ -96,7 +95,7 @@ fn play_cli(playlist_name: String) {
     println!("p: Pause/Play");
 
     let filepaths = playlist.into_iter().map(|x| x.1).collect::<Vec<PathBuf>>();
-    let playlist_paths = SongQueueOld::new(filepaths.clone(), None);
+    // let playlist_paths = SongQueueOld::new(filepaths.clone(), None);
     eprintln!("CLI is broken right now");
     todo!()
     // play_file_list(
@@ -125,14 +124,14 @@ fn play_gui() -> Result<(), PlatformError> {
         }
     };
 
-    let lib_default = Vec::new();
-    let library_initial = playlists.get("Library").unwrap_or(&lib_default);
-    let (library_paths, _) =
-        get_playlist_filepaths(library_initial, ExpandDirOptions::DiscardFolderNames);
-    let library_paths = library_paths
-        .into_iter()
-        .map(|(depth, path)| (depth as i32, path))
-        .collect::<Vec<(i32, PathBuf)>>();
+    // let lib_default = Vec::new();
+    // let library_initial = playlists.get("Library").unwrap_or(&lib_default);
+    // let (library_paths, _) =
+    //     get_playlist_filepaths(library_initial, ExpandDirOptions::DiscardFolderNames);
+    // let library_paths = library_paths
+    //     .into_iter()
+    //     .map(|(depth, path)| (depth as i32, path))
+    //     .collect::<Vec<(i32, PathBuf)>>();
 
     // We could refactor this to make it more optimized.
     // The cloning is probably difficult to remove (the UI and backend both need access),
@@ -162,14 +161,14 @@ fn play_gui() -> Result<(), PlatformError> {
     ui.on_play_playlist(move |playlist_name| {
         let ui = &ui_weak_for_play_ui;
         let player = &player_for_on_play;
-        ui_on_play_playlist(playlist_name, &ui, &playlists_copy_for_play_ui, &player);
+        ui_on_play_playlist(&playlist_name, ui, &playlists_copy_for_play_ui, player);
     });
 
     ui.run()
 }
 
 fn ui_on_play_playlist(
-    playlist_name: SharedString,
+    playlist_name: &SharedString,
     ui: &Weak<AppWindow>,
     playlists: &Mutex<HashMap<String, Vec<String>>>,
     player: &Arc<Player>,
@@ -183,7 +182,7 @@ fn ui_on_play_playlist(
     // If we're at this point, the user clicked a play playlist button.
     // Given that that button had to exist for the user to click it,
     // I think it's safe to assume the playlist exists.
-    #[allow(clippy::unwrap_used)]
+    #[allow(clippy::expect_used)]
     let playlist_paths = playlists
         .get(&playlist_name.to_string())
         .expect("ERROR: Tried to play playlist that didn't exist; this is a bug");
@@ -194,21 +193,21 @@ fn ui_on_play_playlist(
         .map(|x| x.1.clone())
         .collect::<Vec<PathBuf>>();
     // let (visual_song_queue, song_model) = SongQueueOld::new(filepaths.clone(), Some(ui.as_weak()));
-    let (file_song_queue_old, _) = SongQueueOld::new(filepaths.clone(), None);
-    let (visual_song_queue, current_song, immediate_queue_model, playlist_queue_model) = SongModelUI::new(&filepaths);
-    let visual_song_queue = Arc::new(visual_song_queue);
-    let file_song_queue_old = Arc::new(Mutex::new(file_song_queue_old));
+    // let (file_song_queue_old, _) = SongQueueOld::new(filepaths.clone(), None);
+    let (_, current_song, immediate_queue_model, playlist_queue_model) = SongModelUI::new(&filepaths);
+    // let visual_song_queue = Arc::new(visual_song_queue);
+    // let file_song_queue_old = Arc::new(Mutex::new(file_song_queue_old));
     let song_queue = Arc::new(Mutex::new(SongQueue::new(filepaths.clone())));
     
 
     // Spawn the playing thread.
     let command_queue = Arc::new(PlayerCommandQueue::new());
     {   
-        let visual_ref = visual_song_queue.clone();
+        // let visual_ref = visual_song_queue.clone();
         let ui_ref = ui.as_weak();
         let song_finished_closure = move ||{
             let _ = ui_ref.upgrade_in_event_loop(move |ui|{
-                let currently_playing = ui.get_currently_playing();
+                // let currently_playing = ui.get_currently_playing();
                 let playlist_queue_binding = ui.get_playlist_queue();
                 let playlist_queue_maybe = playlist_queue_binding.as_any().downcast_ref::<VecDequeModel<SharedString>>();
                 let user_queue_binding =  ui.get_user_queue();
@@ -231,8 +230,8 @@ fn ui_on_play_playlist(
         
         let command_queue_player = command_queue.clone();
         let player2 = player.clone();
-        let visual_song_queue_ref = visual_song_queue.clone();
-        let file_song_queue_ref = file_song_queue_old.clone();
+        // let visual_song_queue_ref = visual_song_queue.clone();
+        // let file_song_queue_ref = file_song_queue_old.clone();
         let song_queue_ref = song_queue.clone();
         std::thread::spawn(move || {
             play_file_list(
@@ -242,21 +241,21 @@ fn ui_on_play_playlist(
                 // visual_song_queue_ref,
                 &song_finished_closure,
                 command_queue_player,
-            )
+            );
         });
     }
     
 
     {
         let command_queue_ref = command_queue.clone();
-        let ui_ref = ui.as_weak();
+        // let ui_ref = ui.as_weak();
         let library_ref = library.clone();
         let user_queue_ref = immediate_queue_model.clone();
         // let user_queue_ref = user_queue_binding.as_any().downcast_ref::<VecDequeModel<SharedString>>().unwrap();
-        let file_song_queue_ref = file_song_queue_old.clone();
+        // let file_song_queue_ref = file_song_queue_old.clone();
         let song_queue_ref = song_queue.clone();
         ui.on_library_elem_clicked(move |index| {
-            let ui = ui_ref.unwrap();
+            // let ui = ui_ref.unwrap();
             #[allow(clippy::unwrap_used)]
             let user_queue = user_queue_ref.as_any().downcast_ref::<VecDequeModel<SharedString>>().unwrap();
             let _ = library_ref.hide_or_queue(index as usize,
@@ -290,7 +289,7 @@ fn ui_on_play_playlist(
     let cqueue = command_queue.clone();
     ui.on_volume_down(move || cqueue.add_command(PlayerCommand::VolumeDown));
 
-    println!("Playing {playlist_name}")
+    println!("Playing {playlist_name}");
 }
 
 fn read_playlists() -> Result<HashMap<String, Vec<String>>, Box<dyn Error>> {

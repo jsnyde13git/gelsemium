@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, io, path::PathBuf};
 
 use slint::{Model, ModelNotify, SharedString};
-use crate::{player::{PlayerCommandQueue, SongQueue, SongQueueOld, VecDequeModel}, ui::LibraryElem};
+use crate::{player::{PlayerCommandQueue, SongQueue, VecDequeModel}, ui::LibraryElem};
 
 /// Slint-compatible element for the Song Library.
 /// Can be either a folder or a song.

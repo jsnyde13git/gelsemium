@@ -51,11 +51,11 @@ fn parse_playlist(
     }
 
     // Parse the songs in the list.
-    let songs_result = parse_playlist_songs(playlist_iter);
-    if let Err(err) = songs_result {
-        return Err(err);
-    }
-    let songs = songs_result.unwrap();
+    let songs = parse_playlist_songs(playlist_iter);
+    // if let Err(err) = songs_result {
+    //     return Err(err);
+    // }
+    // let songs = songs_result.unwrap();
 
     Ok((title, songs))
 }
@@ -64,7 +64,8 @@ fn parse_playlist_title(
     playlist_iter: &mut Peekable<impl Iterator<Item = (usize, usize, char)>>,
 ) -> Result<String, PlaylistParseError> {
     // Consume the initial [.
-    let (start_line, start_col, _) = playlist_iter.next().unwrap();
+    #[allow(clippy::expect_used)]
+    let (start_line, start_col, _) = playlist_iter.next().expect("Implementation error in parse_playlist_title: Expected a character, but none was found. Please report to the devs");
 
     // Consume non-] characters until we reach EOF or one is found.
     let mut playlist_title = String::new();
@@ -91,7 +92,7 @@ fn parse_playlist_title(
 
 fn parse_playlist_songs(
     playlist_iter: &mut Peekable<impl Iterator<Item = (usize, usize, char)>>,
-) -> Result<Vec<String>, PlaylistParseError> {
+) -> Vec<String> {
     // Parse playlist songs until a [ is encountered at the start of a line,
     // or we reach the end of the file.
     let mut songs = Vec::new();
@@ -102,7 +103,7 @@ fn parse_playlist_songs(
         }
     }
 
-    Ok(songs)
+    songs
 }
 
 fn parse_playlist_song(
