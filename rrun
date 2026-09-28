@@ -1,0 +1,4 @@
+#!/bin/bash
+
+export GELSEMIUM_MUSIC_PLAYER_DIR=.
+cargo run --release

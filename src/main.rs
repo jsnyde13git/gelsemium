@@ -1,8 +1,10 @@
 use rodio::Player;
 use slint::{ComponentHandle, Model, ModelRc, PlatformError, SharedString, VecModel, Weak};
 use std::collections::HashMap;
-use std::env;
+use std::env::{self, home_dir};
 use std::error::Error;
+use std::f64::consts::E;
+use std::fs::{File, create_dir_all};
 use std::io::{self};
 use std::iter::{Iterator, zip};
 use std::path::PathBuf;
@@ -24,13 +26,19 @@ fn main() {
     let mut args = env::args().skip(1);
     let command_maybe = args.next();
     if command_maybe.is_none() {
-        eprintln!("No arguments given. Valid arguments are: play <playlistname>");
+        // eprintln!("No arguments given. Valid arguments are: play <playlistname>");
+        println!("Running in GUI mode. To get help, use arguments: help");
     }
     match command_maybe {
         Some(s) if s == "play" => {
             // Play from the CLI.
             let playlist_name = args.collect::<Vec<String>>().join(" ");
             play_cli(playlist_name);
+        }
+        Some(s) if s == "help" => {
+            println!("Valid arguments are:");
+            println!("play <playlist_name>");
+            println!("help");
         }
         None => {
             // Default option. Opens the GUI.
@@ -89,6 +97,7 @@ fn play_cli(playlist_name: String) {
 
     let filepaths = playlist.into_iter().map(|x| x.1).collect::<Vec<PathBuf>>();
     let playlist_paths = SongQueueOld::new(filepaths.clone(), None);
+    eprintln!("CLI is broken right now");
     todo!()
     // play_file_list(
     //     player,
@@ -333,15 +342,115 @@ fn listen_for_cli_controls(cmd_queue: &PlayerCommandQueue) -> ! {
     }
 }
 
+// Messy function with *a lot* of panic conditions.
+// Needs a refactor so it'll return a Result instead of this.
+// Also consider returning a PathBuf instead of a String, 
+// so we can handle non-UTF-8 filepaths.
 fn get_playlists_file() -> String {
+    // return "playlists.txt".to_string();
+    let mut dir_env: Option<PathBuf> = None;
+    for (key, value) in std::env::vars_os() {
+        if key == "GELSEMIUM_MUSIC_PLAYER_DIR"{
+            dir_env = Some(PathBuf::from(value));
+        }
+    }
+    let playlists_filename = "playlists.txt";
+
     // Check GELSEMIUM_MUSIC_PLAYER_DIR environment variable
     // If set, use that directory
     // Else check if Windows
     // If set, use <user>/Program Files/Local/GelsemiumMusicPlayer
     // Else check if Linux
     // If set, use ~/.local/share/GelsemiumMusicPlayer
-    if cfg!(target_os = "linux") {
-        return "playlists.txt".to_string();
+    if let Some(mut dir) = dir_env{
+        dir.push("playlists.txt");
+        let result = dir.into_string();
+        match result{
+            Err(_) => {
+                panic!("Error: Path must be valid UTF-8.");
+            }
+            Ok(s) => return s,
+        }
+    }else if cfg!(target_os = "linux") {
+        let path_maybe = home_dir();
+        let mut path = match path_maybe{
+            Some(p) => p,
+            None => panic!("Error: Couldn't find user's home directory. Is the user not listed in /etc/passwd?"),
+        };
+        path.push(".local/share/GelsemiumMusicPlayer/");
+        // Check if the folder exists, and if it doesn't, create it.
+        let folder_exists = std::fs::exists(&path);
+        match folder_exists{
+            Err(e) => {
+                panic!("Error reading folder: {:?}.", e);
+            }
+            Ok(true) => {} // nothing to do 
+            Ok(false) => {
+                // make the path
+                let _ = create_dir_all(&path);
+            }
+        }
+        path.push(playlists_filename);
+        // Check if the file exists, and if it doesn't, create it
+        let folder_exists = std::fs::exists(&path);
+        match folder_exists{
+            Err(e) => {
+                panic!("Error reading file: {:?}.", e);
+            }
+            Ok(true) => {} // nothing to do 
+            Ok(false) => {
+                // make the file
+                let _ = File::create(&path);
+            }
+        }
+
+        let result = path.to_str();
+        match result{
+            None =>{
+                panic!("Error: Path must be valid UTF-8. Is the username invalid UTF-8?");
+            }
+            Some(s) => return s.to_string(),
+        }
+    }else if cfg!(target_os = "windows"){
+        let path_maybe = home_dir();
+        let mut path = match path_maybe{
+            Some(p) => p,
+            None => panic!("Error: Couldn't find user's home directory."),
+        };
+        path.push("Program Files/Local/GelsemiumMusicPlayer/");
+        // Check if the folder exists, and if it doesn't, create it.
+        let folder_exists = std::fs::exists(&path);
+        match folder_exists{
+            Err(e) => {
+                panic!("Error reading folder: {:?}.", e);
+            }
+            Ok(true) => {} // nothing to do 
+            Ok(false) => {
+                // make the path
+                let _ = create_dir_all(&path);
+            }
+        }
+        path.push(playlists_filename);
+        // Check if the file exists, and if it doesn't, create it
+        let folder_exists = std::fs::exists(&path);
+        match folder_exists{
+            Err(e) => {
+                panic!("Error reading file: {:?}.", e);
+            }
+            Ok(true) => {} // nothing to do 
+            Ok(false) => {
+                // make the file
+                let _ = File::create(&path);
+            }
+        }
+
+        let result = path.to_str();
+        match result{
+            None =>{
+                panic!("Error: Path must be valid UTF-8. Is the username invalid UTF-8?");
+            }
+            Some(s) => return s.to_string(),
+        }
     }
 
     panic!("Unsupported OS. Supported OSes are: Linux");
