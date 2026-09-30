@@ -42,6 +42,7 @@ pub fn play_file_list(
                 player_copy.sleep_until_end();
                 cmd_queue_copy.add_command(PlayerCommand::SongFinished);
             });
+            println!("Playing {}", filepath.display());
             {song_queue.lock().unwrap().advance()};
 
             break;
@@ -83,7 +84,7 @@ pub fn play_file_list(
                 let player_copy = player.clone();
                 let cmd_queue_copy = command_queue.clone();
                 let source = decode_song(&filepath).unwrap();
-                std::thread::spawn(move || append_and_wait(&player_copy, source, &cmd_queue_copy));
+                std::thread::spawn(move || append_and_wait(&player_copy, source, &filepath, &cmd_queue_copy));
             }
             song_queue.lock().unwrap().advance();
             song_finished();
@@ -96,7 +97,7 @@ pub fn play_file_list(
             let player_copy = player.clone();
             let cmd_queue_copy = command_queue.clone();
             let source = decode_song(&filepath).unwrap();
-            std::thread::spawn(move || append_and_wait(&player_copy, source, &cmd_queue_copy));
+            std::thread::spawn(move || append_and_wait(&player_copy, source, &filepath, &cmd_queue_copy));
         }
         
         // song_finished();
@@ -215,11 +216,12 @@ impl Display for DecodingError{
     }
 }
 
-fn append_and_wait(player: &rodio::Player, source: Decoder<BufReader<File>>, cmd_queue: &PlayerCommandQueue){
+fn append_and_wait(player: &rodio::Player, source: Decoder<BufReader<File>>, path: &PathBuf, cmd_queue: &PlayerCommandQueue){
     player.append(source);
-    // println!("appended {}", filepath.display());
+    // I'm not sure this works or will be stable.
+    println!("Playing {}", path.display());
     player.sleep_until_end();
-    // println!("finished eepin {}", filepath.display());
+    // println!("finished sleeping {}", path.display());
     cmd_queue.add_command(PlayerCommand::SongFinished);
 }
 
@@ -306,240 +308,12 @@ impl PlayerCommandQueue {
     }
 }
 
-// pub struct SongQueueOld {
-//     immediate: VecDeque<PathBuf>,
-//     back: VecDeque<PathBuf>,
-//     // Holds the currently-playing song.
-//     // If this = None, nothing has been pulled yet,
-//     // so it'll be the last thing we pulled.
-//     // If this = Some, then something has been pulled,
-//     // and a request coming in means it's for the one to play *after* this.
-//     currently_playing: Option<PathBuf>,
-//     next_playing: NextPlayingStates,
-//     last_pull_was_back: bool,
-//     // names_model: ModelRc<SharedString>,
-//     // names_rc: Rc<SongNames>,
-//     names_ui: Option<Weak<AppWindow>>,
-// }
-
 #[derive(Debug)]
 pub enum NextPlayingStates{
     None,
     Some(PathBuf),
     JustQueued(PathBuf),
 }
-
-// struct SongNames {
-//     immediate: RefCell<VecDeque<SharedString>>,
-//     back: RefCell<VecDeque<SharedString>>,
-//     notify: slint::ModelNotify,
-// }
-
-// impl Iterator for SongQueueOld {
-//     type Item = PathBuf;
-
-//     fn next(&mut self) -> Option<Self::Item> {
-//         // Pop the first from the song names.
-//         let next = if !self.immediate.is_empty() {
-//             self.last_pull_was_back = false;
-//             self.immediate.pop_front()
-//         } else {
-//             self.last_pull_was_back = true;
-//             let next = self.back.pop_front();
-//             next
-//         };
-
-//         // println!("\n\nBEFORE:\n\ncurrent: {:?}\nnext: {:?}\nrest: {:?}\nret: {:?}", self.currently_playing, self.next_playing, self.back, next);
-
-//         // First pull
-//         if self.currently_playing.is_none(){
-//             self.currently_playing = next.clone();
-//         }
-//         // Second pull
-//         else if let NextPlayingStates::None = self.next_playing{
-//             self.next_playing = if let Some(n) = &next{
-//                 NextPlayingStates::Some(n.clone())
-//             }else{
-//                 NextPlayingStates::None
-//             };
-//         }
-//         // Last pull was immediate
-//         else if let NextPlayingStates::JustQueued(next_p) = &self.next_playing{
-//             self.currently_playing = Some(next_p.clone());
-//             self.next_playing = NextPlayingStates::None;
-//         }
-//         // Otherwise
-//         else{
-//             match &mut self.next_playing{
-//                 NextPlayingStates::Some(n) => {
-//                     if let Some(nxt) = &next{
-//                         self.currently_playing = Some(std::mem::replace(n, nxt.clone()));
-//                     }else{
-//                         self.currently_playing = Some(n.clone());
-//                         self.next_playing = NextPlayingStates::None;
-//                     };
-//                 }
-//                 NextPlayingStates::JustQueued(n) => {
-//                     if let Some(nxt) = &next{
-//                         self.currently_playing = Some(std::mem::replace(n, nxt.clone()));
-//                     }else{
-//                         self.currently_playing = Some(n.clone());
-//                         self.next_playing = NextPlayingStates::None;
-//                     };
-//                 }
-//                 NextPlayingStates::None => self.currently_playing = None,
-//             }
-//             // self.currently_playing = std::mem::replace(&mut self.next_playing, next.clone());
-//         }
-
-
-//         // println!("\n\nAFTER:\n\ncurrent: {:?}\nnext: {:?}\nrest: {:?}\nret: {:?}", self.currently_playing, self.next_playing, self.back, next);
-        
-
-//         // Horrible high-coupling nonsense, but it's the only
-//         // way I've found to modify a Slint model from another thread.
-//         // Not only that, but *updating* the model didn't work,
-//         // so I have to recreate it every time, with a mountain of clone() calls.
-//         if let Some(ui) = &self.names_ui {
-//             let (immediate, back) = self.new_model();
-//             let _ = ui.upgrade_in_event_loop(move |ui| {
-//                 // I tried doing the downcast thing, but ui.get_playlist_queue()
-//                 // didn't want to downcast into SongNames, so it didn't really work.
-//                 ui.set_playlist_queue(ModelRc::new(Rc::new(SongNames {
-//                     immediate: immediate,
-//                     back: back,
-//                     notify: ModelNotify::default(),
-//                 })));
-//             });
-//         }
-        
-//         next
-//     }
-// }
-
-// impl SongQueueOld {
-//     pub fn new(
-//         songs: Vec<PathBuf>,
-//         ui_weak: Option<Weak<AppWindow>>,
-//     ) -> (SongQueueOld, ModelRc<SharedString>) {
-//         // Construct the list of song names.
-//         // We use lossy conversion from OSString here;
-//         // a malformed song name really isn't a big deal.
-//         // (Well, for now anyway. But it's better than a crash.)
-//         let inner_names = songs
-//             .iter()
-//             .filter_map(|path| path.file_name())
-//             .map(|name| name.to_string_lossy().into_owned().into())
-//             .collect::<VecDeque<SharedString>>();
-//         let names_rc = Rc::new(SongNames {
-//             immediate: RefCell::new(VecDeque::new()),
-//             back: RefCell::new(inner_names),
-//             notify: ModelNotify::default(),
-//         });
-
-//         let names_model = ModelRc::from(names_rc.clone());
-
-//         (
-//             SongQueueOld {
-//                 immediate: VecDeque::new(),
-//                 back: VecDeque::from(songs),
-//                 currently_playing: None,
-//                 next_playing: NextPlayingStates::None,
-//                 last_pull_was_back: false,
-//                 names_ui: ui_weak,
-//             },
-//             names_model,
-//         )
-//     }
-
-//     fn new_model(
-//         &self,
-//     ) -> (
-//         RefCell<VecDeque<SharedString>>,
-//         RefCell<VecDeque<SharedString>>,
-//     ) {
-//         let mut inner_names = self
-//             .immediate
-//             .iter()
-//             .chain(self.back.iter())
-//             .filter_map(|path| path.file_name())
-//             .map(|name| name.to_string_lossy().into_owned().into())
-//             .collect::<VecDeque<SharedString>>();
-//         if let Some(current) = &self.currently_playing{
-//             if let NextPlayingStates::Some(next) = &self.next_playing{
-//                 inner_names.push_front(next.file_name().unwrap_or_default().to_string_lossy().into_owned().into());
-//             }
-//             inner_names.push_front(current.file_name().unwrap_or_default().to_string_lossy().into_owned().into());
-//         }
-
-//         (RefCell::new(VecDeque::new()), RefCell::new(inner_names))
-//     }
-
-//     fn update_names(&self){
-//         if let Some(ui) = &self.names_ui {
-//             let (immediate, back) = self.new_model();
-//             let _ = ui.upgrade_in_event_loop(move |ui| {
-//                 // I tried doing the downcast thing, but ui.get_playlist_queue()
-//                 // didn't want to downcast into SongNames, so it didn't really work.
-//                 ui.set_playlist_queue(ModelRc::new(Rc::new(SongNames {
-//                     immediate: immediate,
-//                     back: back,
-//                     notify: ModelNotify::default(),
-//                 })));
-//             });
-//         }
-//     }
-
-//     pub fn queue_immediate(&mut self, item: PathBuf) {
-//         self.immediate.push_back(item.clone());
-//         if self.last_pull_was_back{
-//             if let NextPlayingStates::Some(next) = &self.next_playing && self.last_pull_was_back{
-//                 self.back.push_front(next.clone());
-//                 self.next_playing = NextPlayingStates::JustQueued(item.clone());
-//             }
-//             if let NextPlayingStates::None = &self.next_playing{
-//                 self.next_playing = NextPlayingStates::JustQueued(item.clone());
-//             }
-//         }
-//         self.update_names();
-//     }
-// }
-
-// impl Model for SongNames {
-//     type Data = SharedString;
-
-//     fn row_count(&self) -> usize {
-//         self.immediate.borrow().len() + self.back.borrow().len()
-//     }
-
-//     fn row_data(&self, row: usize) -> Option<Self::Data> {
-//         if row < self.immediate.borrow().len() {
-//             return self.immediate.borrow().get(row).cloned();
-//         }
-//         let row_adj = row - self.immediate.borrow().len();
-//         if row_adj < self.back.borrow().len() {
-//             return self.back.borrow().get(row_adj).cloned();
-//         }
-//         None
-//     }
-
-//     fn model_tracker(&self) -> &dyn slint::ModelTracker {
-//         &self.notify
-//     }
-// }
-
-// impl SongNames {
-//     // Interior mutability
-//     fn pop_front(&self) {
-//         println!("songnames called");
-//         if !self.immediate.borrow().is_empty() {
-//             self.immediate.borrow_mut().pop_front();
-//         } else {
-//             self.back.borrow_mut().pop_front();
-//         }
-//         self.notify.reset();
-//     }
-// }
 
 
 // The song queue for the backend.

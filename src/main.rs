@@ -26,7 +26,7 @@ fn main() {
     let command_maybe = args.next();
     if command_maybe.is_none() {
         // eprintln!("No arguments given. Valid arguments are: play <playlistname>");
-        println!("Running in GUI mode. To get help, use arguments: help");
+        println!("Running in GUI mode. To get CLI help, use arguments: help");
     }
     match command_maybe {
         Some(s) if s == "play" => {
@@ -95,15 +95,15 @@ fn play_cli(playlist_name: &String) {
     println!("p: Pause/Play");
 
     let filepaths = playlist.into_iter().map(|x| x.1).collect::<Vec<PathBuf>>();
-    // let playlist_paths = SongQueueOld::new(filepaths.clone(), None);
-    eprintln!("CLI is broken right now");
-    todo!()
-    // play_file_list(
-    //     player,
-    //     // Arc::new(Mutex::new(filepaths.into_iter())),
-    //     Arc::new(Mutex::new(playlist_paths.0)),
-    //     command_queue,
-    // );
+    let playlist_paths = SongQueue::new(filepaths.clone());
+
+    play_file_list(
+        player,
+        // Arc::new(Mutex::new(filepaths.into_iter())),
+        Arc::new(Mutex::new(playlist_paths)),
+        &||{}, 
+        command_queue,
+    );
 }
 
 fn play_gui() -> Result<(), PlatformError> {
