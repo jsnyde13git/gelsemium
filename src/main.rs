@@ -363,7 +363,7 @@ fn get_playlists_file() -> String {
     // If set, use ~/.local/share/GelsemiumMusicPlayer
     if let Some(mut dir) = dir_env{
         dir.push("playlists.txt");
-        let result = dir.into_string();
+        let result = dir.into_os_string().into_string();
         match result{
             Err(_) => {
                 panic!("Error: Path must be valid UTF-8.");
