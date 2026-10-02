@@ -1,7 +1,6 @@
 use rodio::Player;
-use rust_music_player::playlist_data::PlaylistCollection;
+use gelsemium::playlist_data::PlaylistCollection;
 use slint::{ComponentHandle, Model, ModelRc, PlatformError, SharedString, Weak};
-use std::collections::HashMap;
 use std::env::{self, home_dir};
 use std::error::Error;
 use std::fs::{File, create_dir_all};
@@ -12,11 +11,11 @@ use std::process::exit;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use rust_music_player::player::{PlayerCommand, PlayerCommandQueue, SongModelUI, SongQueue, VecDequeModel, play_file_list};
-use rust_music_player::playlist_parser::parse_playlists;
-use rust_music_player::playlist_parser::{ExpandDirOptions, get_playlist_filepaths};
-use rust_music_player::ui::{AppWindow};
-use rust_music_player::library::Library;
+use gelsemium::player::{PlayerCommand, PlayerCommandQueue, SongModelUI, SongQueue, VecDequeModel, play_file_list};
+use gelsemium::playlist_parser::parse_playlists;
+use gelsemium::playlist_parser::{ExpandDirOptions};
+use gelsemium::ui::{AppWindow};
+use gelsemium::library::Library;
 
 fn main() {
     // Take all non-initial CLI arguments and put them into a string.
@@ -86,7 +85,7 @@ fn play_cli(playlist_name: &String) {
     let mut handle =
         rodio::DeviceSinkBuilder::from_default_device()
         .expect("Opening audio stream failed")
-        .with_buffer_size(rodio::cpal::BufferSize::Fixed(4096))
+        .with_buffer_size(rodio::cpal::BufferSize::Fixed(2048))
         .open_stream().expect("Opening audio stream failed");
     handle.log_on_drop(false);
     let player = Arc::new(rodio::Player::connect_new(&handle.mixer()));
@@ -156,7 +155,7 @@ fn play_gui() -> Result<(), PlatformError> {
     let mut handle =
         rodio::DeviceSinkBuilder::from_default_device()
         .expect("Opening audio stream failed")
-        .with_buffer_size(rodio::cpal::BufferSize::Fixed(4096))
+        .with_buffer_size(rodio::cpal::BufferSize::Fixed(2048))
         .open_stream().expect("Opening audio stream failed");
     handle.log_on_drop(true);
     let player = Arc::new(rodio::Player::connect_new(&handle.mixer()));

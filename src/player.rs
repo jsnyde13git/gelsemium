@@ -4,15 +4,12 @@ use std::error::Error;
 use std::fmt::Display;
 use std::fs::File;
 use std::io::BufReader;
-use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex};
 use rodio::decoder::DecoderBuilder;
-use rodio::{Decoder, Player};
+use rodio::{Decoder};
 use slint::{Model, ModelNotify, ModelRc, SharedString};
-
-// use crate::ui::AppWindow;
 
 // Allowed because it triggers on the Arcs, which while *technically* don't
 // need to be passed by reference, I don't think there's really a lot of
