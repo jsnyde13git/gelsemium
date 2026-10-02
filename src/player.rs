@@ -37,8 +37,8 @@ pub fn play_file_list(
         if let Ok(source) = decode_song(&filepath){
             let player_copy = player.clone();
             let cmd_queue_copy = command_queue.clone();
-            player.append(source);
             std::thread::spawn(move || {
+                player_copy.append(source);
                 player_copy.sleep_until_end();
                 cmd_queue_copy.add_command(PlayerCommand::SongFinished);
             });

@@ -221,6 +221,8 @@ fn ui_on_play_playlist(
                     // let v = playlist_queue.pop_front();
                     if let Some(val) = current_song_maybe{
                         ui.set_currently_playing(val);
+                    }else{
+                        ui.set_currently_playing("".into());
                     }
                 }else{
                     eprintln!("downcast failed");
