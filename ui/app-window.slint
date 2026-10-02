@@ -170,11 +170,23 @@ component PlayingMenu inherits Rectangle{
     
     callback skip();
     callback pause();
+    callback back_to_menu();
 
     in property<[LibraryElem]> library;
     callback library_elem_clicked(int);
 
     background: #f675f6;
+
+    Image{
+        source: @image-url("backbutton.svg");
+        colorize: #fbb5fb;
+        height: 30px;
+        x: 5px;
+        y: 5px;
+        TouchArea{
+            clicked => back_to_menu();
+        }
+    }
 
     HorizontalBox {
         alignment: stretch;
@@ -183,6 +195,8 @@ component PlayingMenu inherits Rectangle{
             width: 50%;
             // Album cover.
             Image{
+                // source: @image-url("playbutton.svg");
+                // image-fit: cover;
                 height: 30%;
             }
             // Skip/play/etc.
@@ -263,6 +277,7 @@ export component AppWindow inherits Window {
     callback volume_down();
     callback skip();
     callback library_elem_clicked(int);
+    callback back_to_menu();
     in property <[string]> playlist_queue;
     in property <[string]> user_queue;
     in property <string> currently_playing;
@@ -293,6 +308,10 @@ export component AppWindow inherits Window {
         skip => skip();
         pause => pause();
         library_elem_clicked(index) => library_elem_clicked(index);
+        back_to_menu => {
+            state = ScreenState.select;
+            back_to_menu();
+        }
     }
 }
 

@@ -3,11 +3,12 @@ use std::error::Error;
 use std::fmt::Display;
 use std::io;
 use std::iter::{Iterator, Peekable};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use crate::playlist_data::{Playlist, PlaylistCollection, PlaylistData};
 
 pub fn parse_playlists(
     playlist_str: &str,
-) -> Result<HashMap<String, Vec<String>>, PlaylistParseError> {
+) -> Result<PlaylistCollection, PlaylistParseError> {
     let mut playlist_str_iter = playlist_str
         .split_inclusive('\n')
         .enumerate()
@@ -17,14 +18,14 @@ pub fn parse_playlists(
                 .map(move |(col, char)| (row, col, char))
         })
         .peekable();
-    let mut playlists = HashMap::new();
+    let mut playlists = PlaylistCollection::new();
     while playlist_str_iter.peek().is_some_and(|(_, _, c)| *c == '[') {
         let playlist_maybe = parse_playlist(&mut playlist_str_iter);
         if let Err(err) = playlist_maybe {
             return Err(err);
         }
         let playlist = playlist_maybe.unwrap();
-        playlists.insert(playlist.0, playlist.1);
+        playlists.push(playlist);
     }
 
     return Ok(playlists);
@@ -32,7 +33,7 @@ pub fn parse_playlists(
 
 fn parse_playlist(
     playlist_iter: &mut Peekable<impl Iterator<Item = (usize, usize, char)>>,
-) -> Result<(String, Vec<String>), PlaylistParseError> {
+) -> Result<Playlist, PlaylistParseError> {
     // Parse the title.
     let title_result = parse_playlist_title(playlist_iter);
     if let Err(err) = title_result {
@@ -47,7 +48,7 @@ fn parse_playlist(
     }
 
     if playlist_iter.peek().is_none() {
-        return Ok((title, Vec::new()));
+        return Ok(Playlist::new(Vec::new(), title));
     }
 
     // Parse the songs in the list.
@@ -57,7 +58,7 @@ fn parse_playlist(
     // }
     // let songs = songs_result.unwrap();
 
-    Ok((title, songs))
+    Ok(Playlist::new(songs, title))
 }
 
 fn parse_playlist_title(
@@ -92,14 +93,14 @@ fn parse_playlist_title(
 
 fn parse_playlist_songs(
     playlist_iter: &mut Peekable<impl Iterator<Item = (usize, usize, char)>>,
-) -> Vec<String> {
+) -> Vec<PlaylistData> {
     // Parse playlist songs until a [ is encountered at the start of a line,
     // or we reach the end of the file.
     let mut songs = Vec::new();
     while playlist_iter.peek().is_some_and(|(_, _, c)| *c != '[') {
         let song_maybe = parse_playlist_song(playlist_iter);
         if let Some(song) = song_maybe {
-            songs.push(song);
+            songs.push(PlaylistData::Path(PathBuf::from(song)));
         }
     }
 
@@ -247,8 +248,13 @@ fn expand_playlist_directory(
 // Filter the filetypes to be mp3, ogg, wav, perhaps others if compatible
 pub fn filter_filetypes(filepaths: &mut Vec<(u8, PathBuf)>) {
     filepaths.retain(|(_, filepath)| {
-        filepath.extension().is_some_and(|extension| {
-            extension == "mp3" || extension == "ogg" || extension == "wav" || extension == "flac"
-        })
+        // filepath.extension().is_some_and(|extension| {
+        //     extension == "mp3" || extension == "ogg" || extension == "wav" || extension == "flac"
+        // })
+        is_valid_filetype(filepath)
     });
+}
+
+pub fn is_valid_filetype(path: &Path) -> bool{
+    path.extension().is_some_and(|extension| extension == "mp3" || extension == "ogg" || extension == "wav" || extension == "flac")
 }

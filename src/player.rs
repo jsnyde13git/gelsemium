@@ -4,6 +4,7 @@ use std::error::Error;
 use std::fmt::Display;
 use std::fs::File;
 use std::io::BufReader;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex};
@@ -17,8 +18,8 @@ use slint::{Model, ModelNotify, ModelRc, SharedString};
 // need to be passed by reference, I don't think there's really a lot of
 // benefit to changing it.
 #[allow(clippy::needless_pass_by_value)]
-pub fn play_file_list(
-    player: Arc<rodio::Player>,
+pub fn play_file_list<T: 'static + PlayerInterface>(
+    player: Arc<T>,
     song_queue: Arc<Mutex<SongQueue>>,
     // ui_queue: Arc<Mutex<SongQueueOld>>,
     song_finished: &dyn Fn(),
@@ -51,28 +52,6 @@ pub fn play_file_list(
         // song_finished();
     }
 
-    // Create the end song detector thread.
-    // MUST be after the first file is added to the queue.
-    // Otherwise it'll just blow through all the filenames before one even gets added.
-    // Well, now that there's the mutex thing, I could just lock the mutex,
-    // spawn the thread, read the thing, and then unlock the mutex.
-    // That seems more complicated and messy though.
-    // let player_ref = player.clone();
-    // let command_queue_ref = command_queue.clone();
-    // let finished_playing = Arc::new(true);
-    // let finished_playing_ref = finished_playing.clone();
-    // let reading_mutex_ref = reading_mutex.clone();
-    // let song_queue_ref = song_queue.clone();
-    // std::thread::spawn(move || {
-    //     end_song_detector(
-    //         &player_ref,
-    //         &command_queue_ref,
-    //         song_queue_ref,
-    //         &finished_playing_ref,
-    //         &reading_mutex_ref,
-    //     )
-    // });
-
     let mut last_result = WaitResult::Ok;
 
     while last_result != WaitResult::Stop {
@@ -84,7 +63,7 @@ pub fn play_file_list(
                 let player_copy = player.clone();
                 let cmd_queue_copy = command_queue.clone();
                 let source = decode_song(&filepath).unwrap();
-                std::thread::spawn(move || append_and_wait(&player_copy, source, &filepath, &cmd_queue_copy));
+                std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
             }
             song_queue.lock().unwrap().advance();
             song_finished();
@@ -97,20 +76,22 @@ pub fn play_file_list(
             let player_copy = player.clone();
             let cmd_queue_copy = command_queue.clone();
             let source = decode_song(&filepath).unwrap();
-            std::thread::spawn(move || append_and_wait(&player_copy, source, &filepath, &cmd_queue_copy));
+            std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
         }
         
         // song_finished();
         command_queue.take_commands();
-        last_result = wait_for_command(&command_queue, &player, &song_queue, song_finished);
+        last_result = wait_for_command(&command_queue, &*player, &song_queue, song_finished);
         // {song_queue.lock().unwrap().advance()};
     }
+    player.stop();
+    
     // // We wait one time at the end
     // wait_for_command(&command_queue, player.clone());
 }
 
 // Returns true if we should stop playing.
-fn wait_for_command(command_queue: &PlayerCommandQueue, player: &Player, song_queue: &Mutex<SongQueue>, song_finished: &dyn Fn()) -> WaitResult{
+fn wait_for_command<T: PlayerInterface>(command_queue: &PlayerCommandQueue, player: &T, song_queue: &Mutex<SongQueue>, song_finished: &dyn Fn()) -> WaitResult{
     use WaitResult::{Stop, QueuedImmediate, Ok};
     // Read commands. If Skip or SongFinished appears, move to the next song.
     // Note that Skip, since it skips one and we only ever have one in the queue,
@@ -216,7 +197,7 @@ impl Display for DecodingError{
     }
 }
 
-fn append_and_wait(player: &rodio::Player, source: Decoder<BufReader<File>>, path: &PathBuf, cmd_queue: &PlayerCommandQueue){
+fn append_and_wait<T: PlayerInterface>(player: &T, source: Decoder<BufReader<File>>, path: &PathBuf, cmd_queue: &PlayerCommandQueue){
     player.append(source);
     // I'm not sure this works or will be stable.
     println!("Playing {}", path.display());
@@ -456,4 +437,80 @@ impl Model for VecDequeModel<SharedString>{
     }
 
     fn as_any(&self) -> &dyn core::any::Any { self }
+}
+
+
+// Trait used so we can dependency-inject a mockup rodio::Player. 
+pub trait PlayerInterface: Send + Sync{
+    fn sleep_until_end(&self);
+    fn append<S: rodio::Source + Send + 'static>(&self, source: S);
+    fn play(&self);
+    fn pause(&self);
+    fn is_paused(&self) -> bool;
+    fn skip_one(&self);
+    fn stop(&self);
+}
+
+impl PlayerInterface for rodio::Player{
+    fn sleep_until_end(&self){
+        self.sleep_until_end();
+    }
+
+    fn append<S: rodio::Source + Send + 'static>(&self, source: S){
+        self.append(source);
+    }
+    
+    fn play(&self) {
+        self.play();
+    }
+    
+    fn pause(&self) {
+        self.pause();
+    }
+    
+    fn is_paused(&self) -> bool{
+        self.is_paused()
+    }
+    
+    fn skip_one(&self) {
+        self.skip_one();
+    }
+
+    fn stop(&self){
+        self.stop();
+    }
+}
+
+struct FakePlayer{
+
+}
+
+impl PlayerInterface for FakePlayer{
+    fn sleep_until_end(&self){
+        todo!()
+    }
+
+    fn append<S>(&self, source: S) where S: rodio::Source + Send + 'static{
+        todo!()
+    }
+    
+    fn play(&self) {
+        todo!()
+    }
+    
+    fn pause(&self) {
+        todo!()
+    }
+    
+    fn is_paused(&self) -> bool {
+        todo!()
+    }
+    
+    fn skip_one(&self) {
+        todo!()
+    }
+
+    fn stop(&self){
+        todo!()
+    }
 }

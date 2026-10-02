@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, io, path::PathBuf};
 
 use slint::{Model, ModelNotify, SharedString};
-use crate::{player::{PlayerCommandQueue, SongQueue, VecDequeModel}, ui::LibraryElem};
+use crate::{player::{PlayerCommandQueue, SongQueue, VecDequeModel}, playlist_data::{PlaylistCollection, PlaylistData}, playlist_parser::is_valid_filetype, ui::LibraryElem};
 
 /// Slint-compatible element for the Song Library.
 /// Can be either a folder or a song.
@@ -148,8 +148,7 @@ struct LibrarySong {
 }
 
 impl Library {
-    // TODO: Remove non-audio files.
-    pub fn get_library(playlists: &HashMap<String, Vec<String>>) -> Library {
+    pub fn get_library(playlists: &PlaylistCollection) -> Library {
         let Some(library_paths) = playlists.get("Library") else{
             return Library { 
                 contents: RefCell::new(LibraryFolder { 
@@ -166,22 +165,26 @@ impl Library {
         let mut subfolders = Vec::new();
         let mut songs = Vec::new();
 
-        for filepath_str in library_paths{
-            let path = PathBuf::from(filepath_str);
-
-            if path.is_dir(){
-                let (folder_maybe, _) = Self::expand_library_dir(path, 0);
-                if let Some(folder) = folder_maybe{
-                    subfolders.push(Box::new(folder));
-                }
-            }else{
-                if let Some(name) = path.file_name(){
-                    songs.push(LibrarySong{
-                        name: name.to_string_lossy().to_string().into(),
-                        path
-                    });
+        for filepath_str in library_paths.raw_data(){
+            if let PlaylistData::Path(path) = filepath_str{
+                if path.is_dir(){
+                    let (folder_maybe, _) = Self::expand_library_dir(path, 0);
+                    if let Some(folder) = folder_maybe{
+                        subfolders.push(Box::new(folder));
+                    }
+                }else{
+                    if let Some(name) = path.file_name(){
+                        songs.push(LibrarySong{
+                            name: name.to_string_lossy().to_string().into(),
+                            path: path.to_path_buf()
+                        });
+                    }
                 }
             }
+
+            // let path = PathBuf::from(filepath_str);
+
+            
         }
 
         Library{
@@ -202,7 +205,7 @@ impl Library {
     // Assumes a directory has been received.
     // If a non-directory is passed (or the filesystem has some weird error),
     // returns None instead of a LibraryFolder.
-    fn expand_library_dir(dir: PathBuf, layer: i32) -> (Option<LibraryFolder>, Vec<io::Error>) {
+    fn expand_library_dir(dir: &PathBuf, layer: i32) -> (Option<LibraryFolder>, Vec<io::Error>) {
         let dir_contents = if dir.is_dir() {
             match dir.read_dir() {
                 Ok(contents) => contents,
@@ -224,7 +227,7 @@ impl Library {
                 Ok(entry) => {
                     if entry.path().is_dir() {
                         dirs.push(entry.path());
-                    } else {
+                    } else if is_valid_filetype(&entry.path()){
                         files.push(entry.path());
                     }
                 }
@@ -251,7 +254,7 @@ impl Library {
         // Recursively call this on all directories.
         let mut subfolders = Vec::new();
         for dir in dirs {
-            let (folder_maybe, mut errors) = Self::expand_library_dir(dir, layer);
+            let (folder_maybe, mut errors) = Self::expand_library_dir(&dir, layer);
             errs.append(&mut errors);
             if let Some(folder) = folder_maybe {
                 subfolders.push(Box::new(folder));

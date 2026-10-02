@@ -1,4 +1,5 @@
 use rodio::Player;
+use rust_music_player::playlist_data::PlaylistCollection;
 use slint::{ComponentHandle, Model, ModelRc, PlatformError, SharedString, Weak};
 use std::collections::HashMap;
 use std::env::{self, home_dir};
@@ -75,7 +76,7 @@ fn play_cli(playlist_name: &String) {
 
     // Expand filepaths into a full list.
     let (playlist, errs) =
-        get_playlist_filepaths(playlist_filepaths, ExpandDirOptions::DiscardFolderNames);
+        playlist_filepaths.to_songs(ExpandDirOptions::DiscardFolderNames);
     for err in errs {
         eprintln!("Error: {err:?}");
     }
@@ -83,7 +84,10 @@ fn play_cli(playlist_name: &String) {
     // Play playlist.
     println!("Playing playlist {playlist_name}");
     let mut handle =
-        rodio::DeviceSinkBuilder::open_default_sink().expect("Opening default audio stream failed");
+        rodio::DeviceSinkBuilder::from_default_device()
+        .expect("Opening audio stream failed")
+        .with_buffer_size(rodio::cpal::BufferSize::Fixed(4096))
+        .open_stream().expect("Opening audio stream failed");
     handle.log_on_drop(false);
     let player = Arc::new(rodio::Player::connect_new(&handle.mixer()));
     let command_queue = Arc::new(PlayerCommandQueue::new());
@@ -139,8 +143,8 @@ fn play_gui() -> Result<(), PlatformError> {
     // If load times become an issue that's an idea, but it's not worth it right now.
     let playlist_names = slint::ModelRc::new(slint::VecModel::from(
         playlists
-            .keys()
-            .map(|k| k.clone().into())
+            .names()
+            .map(|k| k.into())
             .collect::<Vec<slint::SharedString>>(),
     ));
     ui.set_playlist_names(playlist_names);
@@ -152,7 +156,7 @@ fn play_gui() -> Result<(), PlatformError> {
     let mut handle =
         rodio::DeviceSinkBuilder::from_default_device()
         .expect("Opening audio stream failed")
-        .with_buffer_size(rodio::cpal::BufferSize::Fixed(2048))
+        .with_buffer_size(rodio::cpal::BufferSize::Fixed(4096))
         .open_stream().expect("Opening audio stream failed");
     handle.log_on_drop(true);
     let player = Arc::new(rodio::Player::connect_new(&handle.mixer()));
@@ -170,7 +174,7 @@ fn play_gui() -> Result<(), PlatformError> {
 fn ui_on_play_playlist(
     playlist_name: &SharedString,
     ui: &Weak<AppWindow>,
-    playlists: &Mutex<HashMap<String, Vec<String>>>,
+    playlists: &Mutex<PlaylistCollection>,
     player: &Arc<Player>,
 ) {
     let ui = ui.unwrap();
@@ -187,7 +191,7 @@ fn ui_on_play_playlist(
         .get(&playlist_name.to_string())
         .expect("ERROR: Tried to play playlist that didn't exist; this is a bug");
     let (playlist, _) =
-        get_playlist_filepaths(playlist_paths, ExpandDirOptions::DiscardFolderNames);
+        playlist_paths.to_songs(ExpandDirOptions::DiscardFolderNames);
     let filepaths = playlist
         .into_iter()
         .map(|x| x.1.clone())
@@ -274,8 +278,6 @@ fn ui_on_play_playlist(
         ui.set_playlist_queue(playlist_queue_model);
         ui.set_user_queue(immediate_queue_model);
     }
-    {
-    }
 
     // Connect the song model and library to the UI.
     // ui.set_playlist_queue(song_model);
@@ -290,11 +292,20 @@ fn ui_on_play_playlist(
     ui.on_volume_up(move || cqueue.add_command(PlayerCommand::VolumeUp));
     let cqueue = command_queue.clone();
     ui.on_volume_down(move || cqueue.add_command(PlayerCommand::VolumeDown));
+    // And the back button.
+    {
+        let command_queue_copy = command_queue.clone();
+        ui.on_back_to_menu(move || ui_on_back_to_gui(&command_queue_copy));
+    }
 
     println!("Playing {playlist_name}");
 }
 
-fn read_playlists() -> Result<HashMap<String, Vec<String>>, Box<dyn Error>> {
+fn ui_on_back_to_gui(command_queue: &PlayerCommandQueue) {
+    command_queue.add_command(PlayerCommand::Stop);
+}
+
+fn read_playlists() -> Result<PlaylistCollection, Box<dyn Error>> {
     // Read playlists.
     let playlist_file = get_playlists_file();
     let playlist_file_contents = std::fs::read_to_string(playlist_file)?;
