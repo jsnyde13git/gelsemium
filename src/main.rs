@@ -12,7 +12,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use gelsemium::player::{PlayerCommand, PlayerCommandQueue, SongModelUI, SongQueue, VecDequeModel, play_file_list};
-use gelsemium::playlist_parser::parse_playlists;
+use gelsemium::playlist_parser::{is_valid_filetype, parse_playlists};
 use gelsemium::playlist_parser::{ExpandDirOptions};
 use gelsemium::ui::{AppWindow};
 use gelsemium::library::Library;
@@ -194,6 +194,7 @@ fn ui_on_play_playlist(
     let filepaths = playlist
         .into_iter()
         .map(|x| x.1.clone())
+        .filter(|p| is_valid_filetype(p))
         .collect::<Vec<PathBuf>>();
     // let (visual_song_queue, song_model) = SongQueueOld::new(filepaths.clone(), Some(ui.as_weak()));
     // let (file_song_queue_old, _) = SongQueueOld::new(filepaths.clone(), None);
@@ -201,7 +202,6 @@ fn ui_on_play_playlist(
     // let visual_song_queue = Arc::new(visual_song_queue);
     // let file_song_queue_old = Arc::new(Mutex::new(file_song_queue_old));
     let song_queue = Arc::new(Mutex::new(SongQueue::new(filepaths.clone())));
-    
 
     // Spawn the playing thread.
     let command_queue = Arc::new(PlayerCommandQueue::new());

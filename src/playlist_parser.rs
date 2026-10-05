@@ -256,5 +256,9 @@ pub fn filter_filetypes(filepaths: &mut Vec<(u8, PathBuf)>) {
 }
 
 pub fn is_valid_filetype(path: &Path) -> bool{
-    path.extension().is_some_and(|extension| extension == "mp3" || extension == "ogg" || extension == "wav" || extension == "flac")
+    path.extension().is_some_and(|extension| 
+        extension == "mp3" || 
+        extension == "ogg" || 
+        extension == "wav" || 
+        extension == "flac")
 }

@@ -32,18 +32,24 @@ pub fn play_file_list<T: 'static + PlayerInterface>(
         //     break;
         // }
 
-        if let Ok(source) = decode_song(&filepath){
-            let player_copy = player.clone();
-            let cmd_queue_copy = command_queue.clone();
-            std::thread::spawn(move || {
-                player_copy.append(source);
-                player_copy.sleep_until_end();
-                cmd_queue_copy.add_command(PlayerCommand::SongFinished);
-            });
-            println!("Playing {}", filepath.display());
-            {song_queue.lock().unwrap().advance()};
+        match decode_song(&filepath){
+            Ok(source) => {
+                let player_copy = player.clone();
+                let cmd_queue_copy = command_queue.clone();
+                std::thread::spawn(move || {
+                    player_copy.append(source);
+                    player_copy.sleep_until_end();
+                    cmd_queue_copy.add_command(PlayerCommand::SongFinished);
+                });
+                println!("Playing {}", filepath.display());
+                {song_queue.lock().unwrap().advance()};
 
-            break;
+                break;
+            }
+            Err(err) => {
+                eprintln!("Error decoding {}: {err}", filepath.display());
+                song_queue.lock().unwrap().advance();
+            }
         }
         {song_queue.lock().unwrap().advance()};
         // song_finished();
@@ -55,25 +61,55 @@ pub fn play_file_list<T: 'static + PlayerInterface>(
         // If the last one was an immediate queue, we flushed the queue,
         // so we need to queue another.
         if last_result == WaitResult::QueuedImmediate{
-            if let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()}{
-                // let filepath_copy = filepath.clone();
-                let player_copy = player.clone();
-                let cmd_queue_copy = command_queue.clone();
-                let source = decode_song(&filepath).unwrap();
-                std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
+            // if let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()}{
+            //     // let filepath_copy = filepath.clone();
+            //     let player_copy = player.clone();
+            //     let cmd_queue_copy = command_queue.clone();
+            //     let source = decode_song(&filepath).unwrap();
+            //     std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
+            // }
+            while let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()}{
+                match decode_song(&filepath){
+                    Ok(source) => {   
+                        let player_copy = player.clone();
+                        let cmd_queue_copy = command_queue.clone();
+                        std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
+                        break;
+                    }
+                    Err(err) => {
+                        eprintln!("Error decoding {}: {err}", filepath.display());
+                        song_queue.lock().unwrap().advance();
+                    }
+                } 
             }
+
             song_queue.lock().unwrap().advance();
             song_finished();
         }
 
         // Only append & wait if there's another song in the queue.
         // Otherwise, we go straight to waiting for commands.
-        if let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()}{
-            // let filepath_copy = filepath.clone();
-            let player_copy = player.clone();
-            let cmd_queue_copy = command_queue.clone();
-            let source = decode_song(&filepath).unwrap();
-            std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
+        // if let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()}{
+        //     // let filepath_copy = filepath.clone();
+        //     let player_copy = player.clone();
+        //     let cmd_queue_copy = command_queue.clone();
+        //     let source = decode_song(&filepath).unwrap();
+        //     std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
+        // }
+
+        while let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()}{
+            match decode_song(&filepath){
+                Ok(source) => {   
+                    let player_copy = player.clone();
+                    let cmd_queue_copy = command_queue.clone();
+                    std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
+                    break;
+                }
+                Err(err) => {
+                    eprintln!("Error decoding {}: {err}", filepath.display());
+                    song_queue.lock().unwrap().advance();
+                }
+            } 
         }
         
         // song_finished();
@@ -170,7 +206,7 @@ fn decode_song(filepath: &Path) -> Result<Decoder<BufReader<File>>, DecodingErro
     {
         Ok(s) => s,
         Err(err) => {
-            eprintln!("Error reading file {}: {err}", filepath.display());
+            // eprintln!("Error reading file {}: {err}", filepath.display());
             return Err(DecodingError::DecodingError(err));
         }
     };
