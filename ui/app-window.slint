@@ -19,32 +19,93 @@ component SongLibrary inherits Rectangle{
     background: #672b78;
     property<length> offset_per_nest: 20px;
     callback library_elem_clicked(int);
+    callback library_add_clicked();
     property<length> lib_width: self.width;
 
-    ListView{
-        for song[i] in song_names: HorizontalLayout{
-            padding: 2px;
-            x: offset_per_nest*song.nest_level + 5px;
-            alignment: start;
-            preferred-height: !song.is_hidden ? 22px : 0px;
+    VerticalBox{
+        padding: 0;
+        ListView{
+            for song[i] in song_names: HorizontalLayout{
+                padding: 2px;
+                x: offset_per_nest*song.nest_level + 5px;
+                alignment: start;
+                preferred-height: !song.is_hidden ? 22px : 0px;
 
-            if !song.is_hidden: Rectangle{
-                preferred-width: lib_width - parent.x;
-                TouchArea{
-                    preferred-height: 100%;
-                    preferred-width: 100%;
-                    Text{
-                        x: 0;
-                        text: song.name;
-                        horizontal-alignment: start;
+                if !song.is_hidden: Rectangle{
+                    accessible-role: button;
+                    accessible-label: song.name;
+
+                    preferred-width: lib_width - parent.x;
+                    background: ta.has-hover ? #3a1644 : root.background;
+                    animate background {duration: 100ms;}
+                    ta := TouchArea{
+                        preferred-height: 100%;
+                        preferred-width: 100%;
+                        Text{
+                            x: 0;
+                            text: song.name;
+                            horizontal-alignment: start;
+                        }
+                        
+                        clicked => library_elem_clicked(i);
                     }
-                    clicked => library_elem_clicked(i);
                 }
             }
-                
-            
         }
-    }   
+        HorizontalBox{
+            padding: 2px;
+            alignment: end;
+            Image{
+                source: @image-url("skipbutton.svg");
+                colorize: #fbb5fb;
+                TouchArea{
+                    clicked => library_add_clicked();
+                }
+            }
+        }
+    }
+}
+
+component PlaylistEditListing inherits Rectangle{
+    in property<[string]> song_list: ["examplesong1", "examplesong2"];
+
+    ListView{
+        for song in song_list: Rectangle{
+            background: ta.has-hover ? #3a1644 : root.background;
+            animate background {duration: 100ms;}
+            ta := TouchArea{
+                HorizontalBox{
+                    // TODO: Drag area
+                    Text{
+                        text: song;
+                    }
+                    // remove button (X)
+                    Rectangle{}
+                    Image{
+                        source: @image-url("skipbutton.svg");
+                        colorize: #fbb5fb;
+                        TouchArea{
+                            // clicked => skip();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component EditMenu inherits Rectangle{
+    HorizontalBox{
+        alignment: stretch;
+        PlaylistEditListing{
+            width: 50%;
+            background: #672b78;
+        }
+
+        SongLibrary{
+
+        }
+    }    
 }
 
 // Queue of currently-playing songs.
@@ -73,6 +134,7 @@ component SongQueue inherits Rectangle{
     property<length> offset_per_nest: 10px;
 
     VerticalBox{
+        padding: 0;
         // Currently-playing song.
         Rectangle{
             background: queue_background;
@@ -192,6 +254,7 @@ component PlayingMenu inherits Rectangle{
         alignment: stretch;
 
         VerticalBox {
+            padding: 0;
             width: 50%;
             // Album cover.
             Image{
@@ -257,7 +320,7 @@ component PlaylistPlayable inherits Rectangle{
     }
 }
 
-component PlaylistSelect inherits Rectangle{
+component SelectMenu inherits Rectangle{
     background: #f675f6;
     callback play_clicked(string);
     callback edit_clicked(string);
@@ -305,7 +368,7 @@ export component AppWindow inherits Window {
     default-font-family: "League Mono";
 
     property <ScreenState> state: select;
-    if state == ScreenState.select: PlaylistSelect{
+    if state == ScreenState.select: select_menu := SelectMenu{
         playlist_names: playlist_names;
         play_clicked(playlist_name) => {
             state = ScreenState.playing;
@@ -316,7 +379,7 @@ export component AppWindow inherits Window {
             edit_playlist(playlist_name);
         }
     }
-    if state == ScreenState.playing: PlayingMenu{
+    if state == ScreenState.playing: playing_menu := PlayingMenu{
         playlist_queue: playlist_queue;
         user_queue: user_queue;
         currently_playing: currently_playing;
