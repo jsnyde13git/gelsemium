@@ -224,8 +224,9 @@ component PlaylistPlayable inherits Rectangle{
     // width: 90%;
     background: #f74cf7;
     in property <string> playlist_name;
-    callback clicked(string);
-    
+    callback play_clicked(string);
+    callback edit_clicked(string);
+
     HorizontalBox{
         // name
         Text{
@@ -237,12 +238,20 @@ component PlaylistPlayable inherits Rectangle{
         }
         // spacer
         Rectangle{}
+        // edit button
+        Image{
+            source: @image-url("settings.svg");
+            colorize: #fbb5fb;
+            TouchArea{
+                clicked => { root.edit_clicked(playlist_name); }
+            }
+        }
         // play button
         Image{
             source: @image-url("playbutton.svg");
             colorize: #fbb5fb;
             TouchArea{
-                clicked => { root.clicked(playlist_name); }
+                clicked => { root.play_clicked(playlist_name); }
             }
         }
     }
@@ -251,6 +260,7 @@ component PlaylistPlayable inherits Rectangle{
 component PlaylistSelect inherits Rectangle{
     background: #f675f6;
     callback play_clicked(string);
+    callback edit_clicked(string);
     in property<[string]> playlist_names: ["Example Playlist", "Example Playlist 2.0"];
 
     Rectangle {
@@ -262,7 +272,8 @@ component PlaylistSelect inherits Rectangle{
             for playlist_name in playlist_names: 
                 PlaylistPlayable{
                     playlist_name: playlist_name;
-                    clicked(s) => play_clicked(s);
+                    play_clicked(s) => play_clicked(s);
+                    edit_clicked(s) => edit_clicked(s);
             }
         }
     }
@@ -271,7 +282,6 @@ component PlaylistSelect inherits Rectangle{
 enum ScreenState{ select, playing, editing}
 export component AppWindow inherits Window {
     // For the PlayingMenu state.
-    callback play_playlist(string);
     callback pause();
     callback volume_up();
     callback volume_down();
@@ -284,6 +294,8 @@ export component AppWindow inherits Window {
     in property <[LibraryElem]> library;
 
     // For the PlaylistSelect state.
+    callback play_playlist(string);
+    callback edit_playlist(string);
     in property <[string]> playlist_names: ["Example Playlist", "Example Playlist 2.0"];
 
     // For the PlaylistEdit state.
@@ -299,6 +311,10 @@ export component AppWindow inherits Window {
             state = ScreenState.playing;
             play_playlist(playlist_name);
         };
+        edit_clicked(playlist_name) => {
+            state = ScreenState.editing;
+            edit_playlist(playlist_name);
+        }
     }
     if state == ScreenState.playing: PlayingMenu{
         playlist_queue: playlist_queue;

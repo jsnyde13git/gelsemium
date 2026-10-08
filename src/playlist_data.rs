@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display, path::PathBuf};
+use std::{fmt::Display, path::PathBuf};
 
 use crate::playlist_parser::{self, ExpandDirOptions};
 
