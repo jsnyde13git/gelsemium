@@ -7,7 +7,6 @@ use std::fs::{File, create_dir_all};
 use std::io::{self};
 use std::iter::{Iterator};
 use std::path::PathBuf;
-use std::process::exit;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -32,7 +31,10 @@ fn main() {
         Some(s) if s == "play" => {
             // Play from the CLI.
             let playlist_name = args.collect::<Vec<String>>().join(" ");
-            play_cli(&playlist_name);
+            let result = play_cli(&playlist_name);
+            if let Err(e) = result{
+                eprintln!("Error: {e:?}");
+            }
         }
         Some(s) if s == "help" => {
             println!("Valid arguments are:");
@@ -50,28 +52,49 @@ fn main() {
     }
 }
 
-fn play_cli(playlist_name: &String) {
+#[derive(Debug)]
+struct StrError{
+    e: String,
+}
+
+impl Error for StrError{}
+impl From<String> for StrError{
+    fn from(value: String) -> Self {
+        Self{e: value}
+    }
+}
+impl std::fmt::Display for StrError{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{:?}", self.e)
+    }
+}
+
+fn play_cli(playlist_name: &String) -> Result<(), PlayError> {
     // let playlists_maybe = read_playlists();
     // if let Err(err) = playlists_maybe{
     //     eprintln!("Error reading playlists: {err}");
     //     exit(1);
     // }
     // let playlists = playlists_maybe.unwrap();
-    let playlists = match read_playlists() {
-        Ok(p) => p,
-        Err(err) => {
-            eprintln!("Error reading playlists: {err}");
-            exit(1);
-        }
-    };
+    // let playlists = match read_playlists() {
+    //     Ok(p) => p,
+    //     Err(err) => {
+    //         eprintln!("Error reading playlists: {err}");
+    //         exit(1);
+    //     }
+    // };
+    let playlists = read_playlists()
+        .map_err(PlayError::Playlist)?;
 
     // Parse CLI args into a playlist name and access it.
-    let playlist_filepaths_maybe = playlists.get(playlist_name.trim());
-    if let None = playlist_filepaths_maybe {
-        eprintln!("No playlist with that name found.");
-        exit(1);
-    }
-    let playlist_filepaths = playlist_filepaths_maybe.unwrap();
+    // let playlist_filepaths_maybe = playlists.get(playlist_name.trim());
+    // if let None = playlist_filepaths_maybe {
+    //     eprintln!("No playlist with that name found.");
+    //     exit(1);
+    // }
+    // let playlist_filepaths = playlist_filepaths_maybe.unwrap();
+    let playlist_filepaths = playlists.get(playlist_name.trim())
+        .ok_or(PlayError::Playlist(Box::new(StrError{e: "No playlist with that name found.".to_string()})))?;
 
     // Expand filepaths into a full list.
     let (playlist, errs) =
@@ -83,12 +106,11 @@ fn play_cli(playlist_name: &String) {
     // Play playlist.
     println!("Playing playlist {playlist_name}");
     let mut handle =
-        rodio::DeviceSinkBuilder::from_default_device()
-        .expect("Opening audio stream failed")
+        rodio::DeviceSinkBuilder::from_default_device()?
         .with_buffer_size(rodio::cpal::BufferSize::Fixed(2048))
-        .open_stream().expect("Opening audio stream failed");
+        .open_stream()?;
     handle.log_on_drop(false);
-    let player = Arc::new(rodio::Player::connect_new(&handle.mixer()));
+    let player = Arc::new(rodio::Player::connect_new(handle.mixer()));
     let command_queue = Arc::new(PlayerCommandQueue::new());
     let command_queue_cli_listener = command_queue.clone();
     std::thread::spawn(move || listen_for_cli_controls(&command_queue_cli_listener));
@@ -107,9 +129,39 @@ fn play_cli(playlist_name: &String) {
         &||{}, 
         command_queue,
     );
+    Ok(())
 }
 
-fn play_gui() -> Result<(), PlatformError> {
+#[derive(Debug)]
+enum PlayError{
+    // As these are errors, the whole point is the Debug implementation,
+    // which is ignored during dead code analysis.
+    #[allow(dead_code)]
+    Platform(PlatformError),
+    #[allow(dead_code)]
+    DeviceSink(rodio::DeviceSinkError),
+    #[allow(dead_code)]
+    Playlist(Box<dyn Error>),
+}
+
+impl std::fmt::Display for PlayError{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{self:?}")
+    }
+}
+
+impl From<PlatformError> for PlayError{
+    fn from(value: PlatformError) -> Self {
+        Self::Platform(value)
+    }
+}
+impl From<rodio::DeviceSinkError> for PlayError{
+    fn from(value: rodio::DeviceSinkError) -> Self {
+        Self::DeviceSink(value)
+    }
+}
+
+fn play_gui() -> Result<(), PlayError> {
     let ui = AppWindow::new()?;
     // attempt at maximization code
     // might be bugged in slint itself?
@@ -119,13 +171,15 @@ fn play_gui() -> Result<(), PlatformError> {
     //     maximize_ptr.unwrap().window().set_maximized(true); println!("maximized")
     // }).unwrap();
 
-    let playlists = match read_playlists() {
-        Ok(p) => p,
-        Err(err) => {
-            eprintln!("Error reading playlists: {err}");
-            exit(1);
-        }
-    };
+    // let playlists = match read_playlists() {
+    //     Ok(p) => p,
+    //     Err(err) => {
+    //         eprintln!("Error reading playlists: {err}");
+    //         exit(1);
+    //     }
+    // };
+    let playlists = read_playlists()
+        .map_err(PlayError::Playlist)?;
 
     // let lib_default = Vec::new();
     // let library_initial = playlists.get("Library").unwrap_or(&lib_default);
@@ -143,7 +197,7 @@ fn play_gui() -> Result<(), PlatformError> {
     let playlist_names = slint::ModelRc::new(slint::VecModel::from(
         playlists
             .names()
-            .map(|k| k.into())
+            .map(std::convert::Into::into)
             .collect::<Vec<slint::SharedString>>(),
     ));
     ui.set_playlist_names(playlist_names);
@@ -153,12 +207,12 @@ fn play_gui() -> Result<(), PlatformError> {
     let ui_weak_for_play_ui = ui.as_weak();
 
     let mut handle =
-        rodio::DeviceSinkBuilder::from_default_device()
-        .expect("Opening audio stream failed")
-        .with_buffer_size(rodio::cpal::BufferSize::Fixed(2048))
-        .open_stream().expect("Opening audio stream failed");
+        rodio::DeviceSinkBuilder::from_default_device()?
+        // .with_buffer_size(rodio::cpal::BufferSize::Fixed(2048))
+        .with_buffer_size(rodio::cpal::BufferSize::Default)
+        .open_stream()?;
     handle.log_on_drop(true);
-    let player = Arc::new(rodio::Player::connect_new(&handle.mixer()));
+    let player = Arc::new(rodio::Player::connect_new(handle.mixer()));
     let player_for_on_play = player.clone();
 
     ui.on_play_playlist(move |playlist_name| {
@@ -167,7 +221,7 @@ fn play_gui() -> Result<(), PlatformError> {
         ui_on_play_playlist(&playlist_name, ui, &playlists_copy_for_play_ui, player);
     });
 
-    ui.run()
+    ui.run().map_err(std::convert::Into::into)
 }
 
 fn ui_on_play_playlist(
@@ -187,7 +241,7 @@ fn ui_on_play_playlist(
     // I think it's safe to assume the playlist exists.
     #[allow(clippy::expect_used)]
     let playlist_paths = playlists
-        .get(&playlist_name.to_string())
+        .get(playlist_name.as_ref())
         .expect("ERROR: Tried to play playlist that didn't exist; this is a bug");
     let (playlist, _) =
         playlist_paths.to_songs(ExpandDirOptions::DiscardFolderNames);
@@ -260,12 +314,20 @@ fn ui_on_play_playlist(
         // let file_song_queue_ref = file_song_queue_old.clone();
         let song_queue_ref = song_queue.clone();
         ui.on_library_elem_clicked(move |index| {
-            // let ui = ui_ref.unwrap();
+            // False positive. 
+            #[allow(clippy::cast_sign_loss)]
+            let index = if index < 0{
+                eprintln!("Invalid index {index} passed to on_library_elem_clicked. This is a bug.");
+                return;
+            }else {
+                std::cmp::max(0, index) as usize
+            };
+
             #[allow(clippy::unwrap_used)]
             let user_queue = user_queue_ref.as_any().downcast_ref::<VecDequeModel<SharedString>>().unwrap();
-            let _ = library_ref.hide_or_queue(index as usize,
+            let _ = library_ref.hide_or_queue(index,
                 // &mut visual_song_queue_ref.lock().unwrap(), 
-                &user_queue,
+                user_queue,
                 &mut song_queue_ref.lock().unwrap(),
                 &command_queue_ref);
         });
@@ -306,7 +368,7 @@ fn ui_on_back_to_gui(command_queue: &PlayerCommandQueue) {
 
 fn read_playlists() -> Result<PlaylistCollection, Box<dyn Error>> {
     // Read playlists.
-    let playlist_file = get_playlists_file();
+    let playlist_file = get_playlists_file()?;
     let playlist_file_contents = std::fs::read_to_string(playlist_file)?;
     // if let Err(err) = playlist_file_contents_maybe{
     //     eprintln!("Error reading file: {err:?}");
@@ -353,11 +415,47 @@ fn listen_for_cli_controls(cmd_queue: &PlayerCommandQueue) -> ! {
     }
 }
 
-// Messy function with *a lot* of panic conditions.
-// Needs a refactor so it'll return a Result instead of this.
-// Also consider returning a PathBuf instead of a String, 
+#[derive(Debug)]
+enum GetPlaylistFileError{
+    // The whole point of these is their Debug implementation,
+    // which dead code analysis ignores.
+    #[allow(dead_code)]
+    IOErr(io::Error),
+    #[allow(dead_code)]
+    OtherError(String),
+}
+
+impl Error for GetPlaylistFileError{
+    
+}
+
+impl std::fmt::Display for GetPlaylistFileError{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{self:?}")
+    }
+}
+
+impl From<String> for GetPlaylistFileError{
+    fn from(value: String) -> Self {
+        GetPlaylistFileError::OtherError(value)
+    }
+}
+
+impl From<&str> for GetPlaylistFileError{
+    fn from(value: &str) -> Self {
+        Self::OtherError(value.to_string())
+    }
+}
+
+impl From<io::Error> for GetPlaylistFileError{
+    fn from(value: io::Error) -> Self{
+        Self::IOErr(value)
+    }
+}
+
+// Consider returning a PathBuf instead of a String, 
 // so we can handle non-UTF-8 filepaths.
-fn get_playlists_file() -> String {
+fn get_playlists_file() -> Result<String, GetPlaylistFileError> {
     // return "playlists.txt".to_string();
     let mut dir_env: Option<PathBuf> = None;
     for (key, value) in std::env::vars_os() {
@@ -374,95 +472,53 @@ fn get_playlists_file() -> String {
     // Else check if Linux
     // If set, use ~/.local/share/GelsemiumMusicPlayer
     if let Some(mut dir) = dir_env{
-        dir.push("playlists.txt");
-        let result = dir.into_os_string().into_string();
-        match result{
-            Err(_) => {
-                panic!("Error: Path must be valid UTF-8.");
-            }
-            Ok(s) => return s,
-        }
+        dir.push(playlists_filename);
+        let result = dir.into_os_string()
+            .into_string()
+            .map_err(|_| "Environment variable GELSEMIUM_MUSIC_PLAYER_DIR is not valid UTF-8.".to_string())?;
+        return Ok(result);
     }else if cfg!(target_os = "linux") {
-        let path_maybe = home_dir();
-        let mut path = match path_maybe{
-            Some(p) => p,
-            None => panic!("Error: Couldn't find user's home directory. Is the user not listed in /etc/passwd?"),
-        };
+        let mut path = home_dir().ok_or("Couldn't find user's home directory. Is the user not listed in /etc/passwd?".to_string())?;
         path.push(".local/share/GelsemiumMusicPlayer/");
         // Check if the folder exists, and if it doesn't, create it.
-        let folder_exists = std::fs::exists(&path);
-        match folder_exists{
-            Err(e) => {
-                panic!("Error reading folder: {:?}.", e);
-            }
-            Ok(true) => {} // nothing to do 
-            Ok(false) => {
-                // make the path
-                let _ = create_dir_all(&path);
-            }
+        let folder_exists = std::fs::exists(&path)?;
+        if !folder_exists{
+            // make the path
+            create_dir_all(&path)?;
         }
         path.push(playlists_filename);
         // Check if the file exists, and if it doesn't, create it
-        let folder_exists = std::fs::exists(&path);
-        match folder_exists{
-            Err(e) => {
-                panic!("Error reading file: {:?}.", e);
-            }
-            Ok(true) => {} // nothing to do 
-            Ok(false) => {
-                // make the file
-                let _ = File::create(&path);
-            }
+        let file_exists = std::fs::exists(&path)?;
+        if !file_exists{
+            // make the file
+            File::create(&path)?;
         }
 
-        let result = path.to_str();
-        match result{
-            None =>{
-                panic!("Error: Path must be valid UTF-8. Is the username invalid UTF-8?");
-            }
-            Some(s) => return s.to_string(),
-        }
+        let result = path.to_str().ok_or("Path must be valid UTF-8. Is the username invalid UTF-8?".to_string())?;
+        return Ok(result.to_string());
+
     }else if cfg!(target_os = "windows"){
-        let path_maybe = home_dir();
-        let mut path = match path_maybe{
-            Some(p) => p,
-            None => panic!("Error: Couldn't find user's home directory."),
-        };
+        let mut path = home_dir().ok_or("Error: Couldn't find user's home directory.")?;
         path.push("Program Files/Local/GelsemiumMusicPlayer/");
+
         // Check if the folder exists, and if it doesn't, create it.
-        let folder_exists = std::fs::exists(&path);
-        match folder_exists{
-            Err(e) => {
-                panic!("Error reading folder: {:?}.", e);
-            }
-            Ok(true) => {} // nothing to do 
-            Ok(false) => {
-                // make the path
-                let _ = create_dir_all(&path);
-            }
+        let folder_exists = std::fs::exists(&path)?;
+        if !folder_exists{
+            // make the path
+            create_dir_all(&path)?;
         }
         path.push(playlists_filename);
+
         // Check if the file exists, and if it doesn't, create it
-        let folder_exists = std::fs::exists(&path);
-        match folder_exists{
-            Err(e) => {
-                panic!("Error reading file: {:?}.", e);
-            }
-            Ok(true) => {} // nothing to do 
-            Ok(false) => {
-                // make the file
-                let _ = File::create(&path);
-            }
+        let file_exists = std::fs::exists(&path)?;
+        if !file_exists{
+            // make the file
+            File::create(&path)?;
         }
 
-        let result = path.to_str();
-        match result{
-            None =>{
-                panic!("Error: Path must be valid UTF-8. Is the username invalid UTF-8?");
-            }
-            Some(s) => return s.to_string(),
-        }
+        let result = path.to_str().ok_or("Path must be valid UTF-8. Is the username invalid UTF-8?".to_string())?;
+        return Ok(result.to_string());
     }
 
-    panic!("Unsupported OS. Supported OSes are: Linux");
+    return Err("Unsupported OS. Supported OSes are: Linux, Windows".into());
 }

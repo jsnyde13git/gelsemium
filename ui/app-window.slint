@@ -322,6 +322,8 @@ component PlaylistPlayable inherits Rectangle{
 
 component SelectMenu inherits Rectangle{
     background: #f675f6;
+    in property<brush> elem_bg_color: #672b78;
+    in property<brush> elem_color: #f74cf7;
     callback play_clicked(string);
     callback edit_clicked(string);
     in property<[string]> playlist_names: ["Example Playlist", "Example Playlist 2.0"];
@@ -329,11 +331,12 @@ component SelectMenu inherits Rectangle{
     Rectangle {
         width: 50%;
         height: 80%;
-        background: #672b78;
+        background: elem_bg_color;
         VerticalBox{
             alignment: start;
             for playlist_name in playlist_names: 
                 PlaylistPlayable{
+                    background: elem_color;
                     playlist_name: playlist_name;
                     play_clicked(s) => play_clicked(s);
                     edit_clicked(s) => edit_clicked(s);
@@ -367,8 +370,18 @@ export component AppWindow inherits Window {
     title: "Gelsemium Music Player";
     default-font-family: "League Mono";
 
+    // Color properties.
+    property<brush> bg_color: #f675f6;
+    property<brush> elem_bg_color: #672b78;
+    property<brush> elem_color: #f74cf7;
+    property<brush> button_color: #fbb5fb;
+
     property <ScreenState> state: select;
     if state == ScreenState.select: select_menu := SelectMenu{
+        background: bg_color;
+        elem_bg_color: elem_bg_color;
+        elem_color: elem_color;
+
         playlist_names: playlist_names;
         play_clicked(playlist_name) => {
             state = ScreenState.playing;
