@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use gelsemium::player::{PlayerCommand, PlayerCommandQueue, SongModelUI, SongQueue, VecDequeModel, play_file_list};
+use gelsemium::player::{PlayerCommand, PlayerCommandQueue, SongQueue, VecDequeModel, create_song_models, play_file_list};
 use gelsemium::playlist_parser::{is_valid_filetype, parse_playlists};
 use gelsemium::playlist_parser::{ExpandDirOptions};
 use gelsemium::ui::{AppWindow};
@@ -252,7 +252,8 @@ fn ui_on_play_playlist(
         .collect::<Vec<PathBuf>>();
     // let (visual_song_queue, song_model) = SongQueueOld::new(filepaths.clone(), Some(ui.as_weak()));
     // let (file_song_queue_old, _) = SongQueueOld::new(filepaths.clone(), None);
-    let (_, current_song, immediate_queue_model, playlist_queue_model) = SongModelUI::new(&filepaths);
+    // let (_, current_song, immediate_queue_model, playlist_queue_model) = SongModelUI::new(&filepaths);
+    let (current_song, immediate_queue_model, playlist_queue_model) = create_song_models(&filepaths);
     // let visual_song_queue = Arc::new(visual_song_queue);
     // let file_song_queue_old = Arc::new(Mutex::new(file_song_queue_old));
     let song_queue = Arc::new(Mutex::new(SongQueue::new(filepaths.clone())));

@@ -36,12 +36,12 @@ pub fn play_file_list<T: 'static + PlayerInterface>(
             Ok(source) => {
                 let player_copy = player.clone();
                 let cmd_queue_copy = command_queue.clone();
+                println!("Playing {}", filepath.display());
                 std::thread::spawn(move || {
-                    player_copy.append(source);
+                    player_copy.append(source, filepath);
                     player_copy.sleep_until_end();
                     cmd_queue_copy.add_command(PlayerCommand::SongFinished);
                 });
-                println!("Playing {}", filepath.display());
                 {song_queue.lock().unwrap().advance()};
 
                 break;
@@ -118,9 +118,13 @@ pub fn play_file_list<T: 'static + PlayerInterface>(
         // {song_queue.lock().unwrap().advance()};
     }
     player.stop();
-    
-    // // We wait one time at the end
-    // wait_for_command(&command_queue, player.clone());
+    // Ensure the player is in the playing state before exiting.
+    // If this isn't done, then in GUI mode it'll still be paused
+    // when we enter a new playlist, but the GUI won't recognize this,
+    // so there'll be a UI/backend desync. 
+    if player.is_paused(){
+        player.play();
+    }
 }
 
 // Returns true if we should stop playing.
@@ -231,7 +235,7 @@ impl Display for DecodingError{
 }
 
 fn append_and_wait<T: PlayerInterface>(player: &T, source: Decoder<BufReader<File>>, path: &PathBuf, cmd_queue: &PlayerCommandQueue){
-    player.append(source);
+    player.append(source, path.clone());
     // I'm not sure this works or will be stable.
     println!("Playing {}", path.display());
     player.sleep_until_end();
@@ -365,61 +369,38 @@ impl SongQueue{
     }
 }
 
-// The visual representation for the song list in the UI.
-pub struct SongModelUI{
-    current_song: Option<SharedString>,
-    immediate_queue: Rc<VecDequeModel<SharedString>>,
-    playlist_queue: Rc<VecDequeModel<SharedString>>,
-}
+// Returns in the order (handle for this, current_song, immediate_queue, playlist_queue) 
+#[must_use]
+pub fn create_song_models(songs: &[PathBuf]) -> (SharedString, ModelRc<SharedString>, ModelRc<SharedString>){
+    let current_song: SharedString = songs.get(0).unwrap_or(&PathBuf::from(""))
+        .file_name()
+        .map_or("Error: couldn't read filename".into(), |s| s.to_string_lossy())
+        .into_owned()
+        .into();
 
-impl SongModelUI{
-    // Returns in the order (handle for this, current_song, immediate_queue, playlist_queue) 
-    #[must_use]
-    pub fn new(songs: &[PathBuf]) -> (SongModelUI, SharedString, ModelRc<SharedString>, ModelRc<SharedString>){
-        let current_song: SharedString = songs.get(0).unwrap_or(&PathBuf::from(""))
-            .file_name()
-            .map_or("Error: couldn't read filename".into(), |s| s.to_string_lossy())
-            .into_owned()
-            .into();
+    let playlist_queue: Rc<VecDequeModel<SharedString>> =
+        Rc::new(
+            VecDequeModel::new(
+                songs.get(1..).unwrap_or(&[]).into_iter()
+                .map(|path| path
+                    .file_name()
+                    .map_or("Error: couldn't read filename".into(), |s| s.to_string_lossy())
+                    .into_owned()
+                    .into())
+                .collect()
+            )
+        );
 
-        let playlist_queue: Rc<VecDequeModel<SharedString>> =
-            Rc::new(
-                VecDequeModel::new(
-                    songs.get(1..).unwrap_or(&[]).into_iter()
-                    .map(|path| path
-                        .file_name()
-                        .map_or("Error: couldn't read filename".into(), |s| s.to_string_lossy())
-                        .into_owned()
-                        .into())
-                    .collect()
-                )
-            );
+    let playlist_model = ModelRc::from(playlist_queue.clone());
 
-        let playlist_model = ModelRc::from(playlist_queue.clone());
+    let immediate_queue = Rc::new(VecDequeModel::new(VecDeque::new()));
+    let immediate_model = ModelRc::from(immediate_queue.clone());
 
-        let immediate_queue = Rc::new(VecDequeModel::new(VecDeque::new()));
-        let immediate_model = ModelRc::from(immediate_queue.clone());
-
-        (
-            SongModelUI{
-                current_song: Some(current_song.clone()),
-                playlist_queue,
-                immediate_queue
-            },
-            current_song,
-            immediate_model,
-            playlist_model,
-        )
-    }
-
-    // pub fn song_finished(&mut self) -> Option<SharedString>{
-    //     if self.immediate_queue.is_empty(){
-    //         self.current_song = self.playlist_queue.pop_front();
-    //     }else{
-    //         self.current_song = self.immediate_queue.pop_front();
-    //     }
-    //     self.current_song.clone()
-    // }
+    (
+        current_song,
+        immediate_model,
+        playlist_model,
+    )
 }
 
 pub struct VecDequeModel<T>{
@@ -476,7 +457,7 @@ impl Model for VecDequeModel<SharedString>{
 // Trait used so we can dependency-inject a mockup rodio::Player. 
 pub trait PlayerInterface: Send + Sync{
     fn sleep_until_end(&self);
-    fn append<S: rodio::Source + Send + 'static>(&self, source: S);
+    fn append<S: rodio::Source + Send + 'static>(&self, source: S, path: PathBuf);
     fn play(&self);
     fn pause(&self);
     fn is_paused(&self) -> bool;
@@ -489,7 +470,7 @@ impl PlayerInterface for rodio::Player{
         self.sleep_until_end();
     }
 
-    fn append<S: rodio::Source + Send + 'static>(&self, source: S){
+    fn append<S: rodio::Source + Send + 'static>(&self, source: S, path: PathBuf){
         self.append(source);
     }
     
@@ -515,7 +496,8 @@ impl PlayerInterface for rodio::Player{
 }
 
 struct FakePlayer{
-
+    // List of songs played, including their paths and whether they were skipped.
+    played_songs: Mutex<Vec<(PathBuf, bool)>>,
 }
 
 impl PlayerInterface for FakePlayer{
@@ -523,7 +505,7 @@ impl PlayerInterface for FakePlayer{
         todo!()
     }
 
-    fn append<S>(&self, source: S) where S: rodio::Source + Send + 'static{
+    fn append<S>(&self, source: S, path: PathBuf) where S: rodio::Source + Send + 'static{
         todo!()
     }
     
