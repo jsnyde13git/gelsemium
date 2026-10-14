@@ -19,11 +19,12 @@ pub fn parse_playlists(
         .peekable();
     let mut playlists = PlaylistCollection::new();
     while playlist_str_iter.peek().is_some_and(|(_, _, c)| *c == '[') {
-        let playlist_maybe = parse_playlist(&mut playlist_str_iter);
-        if let Err(err) = playlist_maybe {
-            return Err(err);
-        }
-        let playlist = playlist_maybe.unwrap();
+        // let playlist_maybe = parse_playlist(&mut playlist_str_iter);
+        // if let Err(err) = playlist_maybe {
+        //     return Err(err);
+        // }
+        // let playlist = playlist_maybe.unwrap();
+        let playlist = parse_playlist(&mut playlist_str_iter)?;
         playlists.push(playlist);
     }
 
@@ -34,11 +35,12 @@ fn parse_playlist(
     playlist_iter: &mut Peekable<impl Iterator<Item = (usize, usize, char)>>,
 ) -> Result<Playlist, PlaylistParseError> {
     // Parse the title.
-    let title_result = parse_playlist_title(playlist_iter);
-    if let Err(err) = title_result {
-        return Err(err);
-    }
-    let title = title_result.unwrap();
+    // let title_result = parse_playlist_title(playlist_iter);
+    // if let Err(err) = title_result {
+    //     return Err(err);
+    // }
+    // let title = title_result.unwrap();
+    let title = parse_playlist_title(playlist_iter)?;
 
     // Consume tokens until a newline is encountered.
     // Anything on the line after the playlist name is simply ignored.
@@ -74,11 +76,13 @@ fn parse_playlist_title(
         .is_some_and(|(_, _, c)| *c != ']' && *c != '\n')
     {
         // Advances iterator
+        // Already checked whether this exists with the peek() in the loop condition.
+        #[allow(clippy::unwrap_used)]
         playlist_title.push(playlist_iter.next().unwrap().2);
     }
 
     // Assert that there is a ] at the end, and if not, return error
-    if !playlist_iter.peek().is_some_and(|(_, _, c)| *c == ']') {
+    if playlist_iter.peek().is_none_or(|(_, _, c)| *c != ']') {
         return Err(PlaylistParseError::UnclosedBracket {
             line: start_line,
             col: start_col,
@@ -114,6 +118,8 @@ fn parse_playlist_song(
     let mut all_whitespace = true;
     let mut filepath = String::new();
     while playlist_iter.peek().is_some_and(|(_, _, c)| *c != '\n') {
+        // We already checked whether this exists with the peek there ^.
+        #[allow(clippy::unwrap_used)]
         let c = playlist_iter.next().unwrap().2;
         // advances iterator
         filepath.push(c);
@@ -156,6 +162,7 @@ pub enum ExpandDirOptions {
 
 // Converts the list of folder & filenames into just a list of filenames.
 // Prints errors.
+#[must_use]
 pub fn get_playlist_filepaths(
     filepaths: &Vec<String>,
     keep_folders: ExpandDirOptions,
@@ -184,11 +191,15 @@ fn expand_playlist_directory(
     if dir.is_dir() {
         // for each entry in dir_path, find its name as a string,
         // then call expand playlist directory recursively on each
-        let dir_contents_maybe = dir.read_dir();
-        if let Err(err) = dir_contents_maybe {
-            return (Vec::new(), vec![err]);
-        }
-        let dir_contents = dir_contents_maybe.unwrap();
+        // let dir_contents_maybe = dir.read_dir();
+        // if let Err(err) = dir_contents_maybe {
+        //     return (Vec::new(), vec![err]);
+        // }
+        // let dir_contents = dir_contents_maybe.unwrap();
+        let dir_contents = match dir.read_dir(){
+            Ok(v) => v,
+            Err(err) => return (Vec::new(), vec![err])
+        };
 
         // Split dir_contents into directories and files,
         // then sort both.
@@ -254,6 +265,7 @@ pub fn filter_filetypes(filepaths: &mut Vec<(u8, PathBuf)>) {
     });
 }
 
+#[must_use]
 pub fn is_valid_filetype(path: &Path) -> bool{
     path.extension().is_some_and(|extension| 
         extension == "mp3" || 

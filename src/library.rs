@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, io, path::PathBuf};
+use std::{cell::RefCell, io, path::PathBuf};
 
 use slint::{Model, ModelNotify, SharedString};
 use crate::{player::{PlayerCommandQueue, SongQueue, VecDequeModel}, playlist_data::{PlaylistCollection, PlaylistData}, playlist_parser::is_valid_filetype, ui::LibraryElem};
@@ -8,18 +8,6 @@ use crate::{player::{PlayerCommandQueue, SongQueue, VecDequeModel}, playlist_dat
 /// Normally in Rust we'd represent that with a sum type,
 /// but Slint doesn't have those. So bool it is.
 /// They have the same fields anyway.
-// #[derive(Clone, Debug)]
-// pub struct SlintLibraryElem {
-//     nest_level: i32,
-//     name: SharedString,
-//     is_folder: bool,
-// }
-
-// struct Library {
-//     paths: Vec<PathBuf>,
-//     model: ModelRc<LibraryElem>,
-// }
-
 pub struct Library {
     contents: RefCell<LibraryFolder>,
     tracker: ModelNotify,
@@ -90,13 +78,13 @@ impl LibraryFolder {
                 if self.hidden{
                     return Some(LibraryElem{
                         nest_level: nest_level as i32,
-                        name: "".to_string().into(),
+                        name: String::new().into(),
                         is_folder: true,
                         is_hidden: true,
                     });
-                }else{
-                    return folder.find(index, prev_elems + 1, nest_level+1);
                 }
+                return folder.find(index, prev_elems + 1, nest_level+1);
+                
             }else{
                 // skip this folder
                 prev_elems += 1 + folder.elements;
@@ -127,10 +115,9 @@ impl LibraryFolder {
             if index < folder.elements + prev_elems + 1{
                 // element is in this folder
                 return folder.find_mut(index, prev_elems + 1);
-            }else{
-                // skip this folder
-                prev_elems += 1 + folder.elements;
             }
+            // skip this folder
+            prev_elems += 1 + folder.elements;
         }
 
         // no more folders; must be a song within this folder
@@ -172,13 +159,11 @@ impl Library {
                     if let Some(folder) = folder_maybe{
                         subfolders.push(Box::new(folder));
                     }
-                }else{
-                    if let Some(name) = path.file_name(){
-                        songs.push(LibrarySong{
-                            name: name.to_string_lossy().to_string().into(),
-                            path: path.to_path_buf()
-                        });
-                    }
+                }else if let Some(name) = path.file_name(){
+                    songs.push(LibrarySong{
+                        name: name.to_string_lossy().to_string().into(),
+                        path: path.clone(),
+                    });
                 }
             }
 

@@ -24,7 +24,8 @@ pub fn play_file_list<T: 'static + PlayerInterface>(
 ) {
     // Put one song in the queue before the main loop.
     // That way we'll always have two songs in the queue, letting us do gapless. (Hopefully)
-    // Not the best code I've written but a little break is fine in a five-line thing I'm sure.
+    // Not the best code I've written but a little break is fine in a short thing I'm sure.
+    #[expect(clippy::missing_panics_doc, reason = "infallible if and only if no other thread panics")]
     while let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()} {
         // song_queue.lock().unwrap().next();
         // if let Ok(_) = append_next_song(&player, filepath) {
@@ -42,7 +43,8 @@ pub fn play_file_list<T: 'static + PlayerInterface>(
                     player_copy.sleep_until_end();
                     cmd_queue_copy.add_command(PlayerCommand::SongFinished);
                 });
-                {song_queue.lock().unwrap().advance()};
+                #[expect(clippy::missing_panics_doc, reason = "infallible if and only if no other thread panics")]
+                song_queue.lock().unwrap().advance();
 
                 break;
             }
@@ -51,7 +53,8 @@ pub fn play_file_list<T: 'static + PlayerInterface>(
                 song_queue.lock().unwrap().advance();
             }
         }
-        {song_queue.lock().unwrap().advance()};
+        #[expect(clippy::missing_panics_doc, reason = "infallible if and only if no other thread panics")]
+        song_queue.lock().unwrap().advance();
         // song_finished();
     }
 
@@ -68,6 +71,7 @@ pub fn play_file_list<T: 'static + PlayerInterface>(
             //     let source = decode_song(&filepath).unwrap();
             //     std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
             // }
+            #[expect(clippy::missing_panics_doc, reason = "infallible if and only if no other thread panics")]
             while let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()}{
                 match decode_song(&filepath){
                     Ok(source) => {   
@@ -78,11 +82,13 @@ pub fn play_file_list<T: 'static + PlayerInterface>(
                     }
                     Err(err) => {
                         eprintln!("Error decoding {}: {err}", filepath.display());
+                        #[expect(clippy::missing_panics_doc, reason = "infallible if and only if no other thread panics")]
                         song_queue.lock().unwrap().advance();
                     }
                 } 
             }
 
+            #[expect(clippy::missing_panics_doc, reason = "infallible if and only if no other thread panics")]
             song_queue.lock().unwrap().advance();
             song_finished();
         }
@@ -97,6 +103,7 @@ pub fn play_file_list<T: 'static + PlayerInterface>(
         //     std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
         // }
 
+        #[expect(clippy::missing_panics_doc, reason = "infallible if and only if no other thread panics")]
         while let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()}{
             match decode_song(&filepath){
                 Ok(source) => {   
@@ -107,6 +114,7 @@ pub fn play_file_list<T: 'static + PlayerInterface>(
                 }
                 Err(err) => {
                     eprintln!("Error decoding {}: {err}", filepath.display());
+                    #[expect(clippy::missing_panics_doc, reason = "infallible if and only if no other thread panics")]
                     song_queue.lock().unwrap().advance();
                 }
             } 
@@ -147,8 +155,8 @@ fn wait_for_command<T: PlayerInterface>(command_queue: &PlayerCommandQueue, play
                         player.pause();
                     }
                 }
-                PlayerCommand::VolumeUp => {}
-                PlayerCommand::VolumeDown => {}
+                PlayerCommand::VolumeUp |
+                PlayerCommand::VolumeDown => {eprintln!("Currently unsupported")}
                 PlayerCommand::Skip => {
                     player.skip_one();
                 }
@@ -234,8 +242,8 @@ impl Display for DecodingError{
     }
 }
 
-fn append_and_wait<T: PlayerInterface>(player: &T, source: Decoder<BufReader<File>>, path: &PathBuf, cmd_queue: &PlayerCommandQueue){
-    player.append(source, path.clone());
+fn append_and_wait<T: PlayerInterface>(player: &T, source: Decoder<BufReader<File>>, path: &Path, cmd_queue: &PlayerCommandQueue){
+    player.append(source, path.to_owned());
     // I'm not sure this works or will be stable.
     println!("Playing {}", path.display());
     player.sleep_until_end();
@@ -295,6 +303,7 @@ pub struct PlayerCommandQueue {
 }
 
 impl PlayerCommandQueue {
+    #[must_use]
     pub fn new() -> PlayerCommandQueue {
         PlayerCommandQueue {
             command_list: Mutex::new(Vec::new()),
@@ -305,6 +314,7 @@ impl PlayerCommandQueue {
     /// Adds one command.
     /// Modifies the mutex.
     pub fn add_command(&self, cmd: PlayerCommand) {
+        #[expect(clippy::missing_panics_doc, reason = "infallible if and only if no other thread panics")]
         let mut lock = self.command_list.lock().unwrap();
         lock.push(cmd);
         self.needs_update.notify_all();
@@ -326,6 +336,12 @@ impl PlayerCommandQueue {
     }
 }
 
+impl Default for PlayerCommandQueue{
+    fn default() -> Self{
+        Self::new()
+    }
+}
+
 #[derive(Debug)]
 pub enum NextPlayingStates{
     None,
@@ -341,6 +357,7 @@ pub struct SongQueue{
 }
 
 impl SongQueue{
+    #[must_use]
     pub fn new(songs: Vec<PathBuf>) -> SongQueue{
         SongQueue{
             normal_queue: songs.into(),
@@ -372,7 +389,7 @@ impl SongQueue{
 // Returns in the order (handle for this, current_song, immediate_queue, playlist_queue) 
 #[must_use]
 pub fn create_song_models(songs: &[PathBuf]) -> (SharedString, ModelRc<SharedString>, ModelRc<SharedString>){
-    let current_song: SharedString = songs.get(0).unwrap_or(&PathBuf::from(""))
+    let current_song: SharedString = songs.first().unwrap_or(&PathBuf::from(""))
         .file_name()
         .map_or("Error: couldn't read filename".into(), |s| s.to_string_lossy())
         .into_owned()
@@ -381,7 +398,7 @@ pub fn create_song_models(songs: &[PathBuf]) -> (SharedString, ModelRc<SharedStr
     let playlist_queue: Rc<VecDequeModel<SharedString>> =
         Rc::new(
             VecDequeModel::new(
-                songs.get(1..).unwrap_or(&[]).into_iter()
+                songs.get(1..).unwrap_or(&[]).iter()
                 .map(|path| path
                     .file_name()
                     .map_or("Error: couldn't read filename".into(), |s| s.to_string_lossy())

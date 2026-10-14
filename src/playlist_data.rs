@@ -8,6 +8,7 @@ pub struct PlaylistCollection{
 }
 
 impl PlaylistCollection{
+    #[must_use]
     pub fn new() -> Self{
         Self {
             playlists: Vec::new()
@@ -18,6 +19,7 @@ impl PlaylistCollection{
         self.playlists.push(playlist);
     }
 
+    #[must_use]
     pub fn get(&self, name: &str) -> Option<&Playlist>{
         self.playlists.iter().find(|p| p.name == *name)
     }
@@ -29,6 +31,12 @@ impl PlaylistCollection{
         // Basically we're taking a String and 
         // getting the address of its internal str.
         self.playlists.iter().map(|p| &*p.name)
+    }
+}
+
+impl Default for PlaylistCollection {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -48,6 +56,7 @@ pub struct Playlist{
 }
 
 impl Playlist{
+    #[must_use]
     pub fn new(data: Vec<PlaylistData>, name: String) -> Self{
         Self{
             data,
@@ -55,6 +64,7 @@ impl Playlist{
         }
     }
 
+    #[must_use]
     pub fn to_songs(&self, options: ExpandDirOptions) -> (Vec<(u8, PathBuf)>, Vec<std::io::Error>){
         let filepaths = self.to_strings();
         let (paths, errors) = playlist_parser::get_playlist_filepaths(&filepaths, options);
@@ -74,6 +84,7 @@ impl Playlist{
         strs
     }
 
+    #[must_use]
     pub fn raw_data(&self) -> &Vec<PlaylistData>{
         &self.data
     }
@@ -101,7 +112,7 @@ impl Display for PlaylistData{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self{
             PlaylistData::Path(path) => {
-                writeln!(f, "{}", path.display())?;
+                write!(f, "{}", path.display())?;
             }
         }
 
