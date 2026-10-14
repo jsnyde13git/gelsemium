@@ -1,7 +1,7 @@
-use std::{cell::RefCell, io, path::PathBuf};
+use std::{cell::RefCell, io, path::{Path, PathBuf}};
 
 use slint::{Model, ModelNotify, SharedString};
-use crate::{player::{PlayerCommandQueue, SongQueue, VecDequeModel}, playlist_data::{PlaylistCollection, PlaylistData}, playlist_parser::is_valid_filetype, ui::LibraryElem};
+use crate::{player::{PlayerCommandQueue, SongQueue, VecDequeModel}, playlist_data::{PlaylistCollection}, playlist_parser::is_valid_filetype, ui::LibraryElem};
 
 /// Slint-compatible element for the Song Library.
 /// Can be either a folder or a song.
@@ -84,11 +84,9 @@ impl LibraryFolder {
                     });
                 }
                 return folder.find(index, prev_elems + 1, nest_level+1);
-                
-            }else{
-                // skip this folder
-                prev_elems += 1 + folder.elements;
             }
+            // otherwise, skip this folder
+            prev_elems += 1 + folder.elements;
         }
 
         // no more folders; must be a song within this folder
@@ -153,23 +151,18 @@ impl Library {
         let mut songs = Vec::new();
 
         for filepath_str in library_paths.raw_data(){
-            if let PlaylistData::Path(path) = filepath_str{
-                if path.is_dir(){
-                    let (folder_maybe, _) = Self::expand_library_dir(path, 0);
-                    if let Some(folder) = folder_maybe{
-                        subfolders.push(Box::new(folder));
-                    }
-                }else if let Some(name) = path.file_name(){
-                    songs.push(LibrarySong{
-                        name: name.to_string_lossy().to_string().into(),
-                        path: path.clone(),
-                    });
+            let path = filepath_str.get_path();
+            if path.is_dir(){
+                let (folder_maybe, _) = Self::expand_library_dir(path, 0);
+                if let Some(folder) = folder_maybe{
+                    subfolders.push(Box::new(folder));
                 }
+            }else if let Some(name) = path.file_name(){
+                songs.push(LibrarySong{
+                    name: name.to_string_lossy().to_string().into(),
+                    path: path.clone(),
+                });
             }
-
-            // let path = PathBuf::from(filepath_str);
-
-            
         }
 
         Library{
@@ -190,7 +183,7 @@ impl Library {
     // Assumes a directory has been received.
     // If a non-directory is passed (or the filesystem has some weird error),
     // returns None instead of a LibraryFolder.
-    fn expand_library_dir(dir: &PathBuf, layer: i32) -> (Option<LibraryFolder>, Vec<io::Error>) {
+    fn expand_library_dir(dir: &Path, layer: i32) -> (Option<LibraryFolder>, Vec<io::Error>) {
         let dir_contents = if dir.is_dir() {
             match dir.read_dir() {
                 Ok(contents) => contents,
@@ -225,6 +218,9 @@ impl Library {
         let songs: Vec<LibrarySong> = files
             .into_iter()
             .filter_map(|path| {
+                // False positive. Borrowing issues prevent
+                // this from easily being represented as a map. 
+                #[allow(clippy::manual_map)]
                 if let Some(name) = path.file_name() {
                     Some(LibrarySong {
                         name: name.to_string_lossy().to_string().into(),
@@ -248,8 +244,10 @@ impl Library {
 
         let name = dir
             .file_name()
-            .map(|name| name.to_string_lossy().to_string().into())
-            .unwrap_or("ERROR Couldn't read folder name".into());
+            // .map(|name| name.to_string_lossy().to_string().into())
+            // .unwrap_or("ERROR Couldn't read folder name".into());
+            .map_or("ERROR: Couldn't read folder name".into(), 
+            |name| name.to_string_lossy().to_string().into());
 
         (
             Some(LibraryFolder {

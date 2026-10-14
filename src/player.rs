@@ -487,7 +487,7 @@ impl PlayerInterface for rodio::Player{
         self.sleep_until_end();
     }
 
-    fn append<S: rodio::Source + Send + 'static>(&self, source: S, path: PathBuf){
+    fn append<S: rodio::Source + Send + 'static>(&self, source: S, _: PathBuf){
         self.append(source);
     }
     
@@ -513,8 +513,24 @@ impl PlayerInterface for rodio::Player{
 }
 
 struct FakePlayer{
-    // List of songs played, including their paths and whether they were skipped.
-    played_songs: Mutex<Vec<(PathBuf, bool)>>,
+    received_actions: Mutex<Vec<ReceivedInstruction>>,
+    paused: Mutex<bool>,
+}
+ 
+/// Received instructions for FakePlayer.
+enum ReceivedInstruction
+{
+    Append{source: Mutex<Box<dyn rodio::Source + Send + 'static>>, path: PathBuf},
+    Play,
+    Pause,
+    Skip,
+    Stop,
+}
+
+impl FakePlayer{
+    fn lock_actions<'a>(&'a self) -> std::sync::MutexGuard<'a, Vec<ReceivedInstruction>>{
+        self.received_actions.lock().unwrap()
+    }
 }
 
 impl PlayerInterface for FakePlayer{
@@ -523,26 +539,35 @@ impl PlayerInterface for FakePlayer{
     }
 
     fn append<S>(&self, source: S, path: PathBuf) where S: rodio::Source + Send + 'static{
-        todo!()
+        self.lock_actions().push(
+            ReceivedInstruction::Append { 
+                source: Mutex::new(Box::new(source)), 
+                path 
+        });
     }
     
     fn play(&self) {
-        todo!()
+        self.lock_actions().push(ReceivedInstruction::Play);
+        *self.paused.lock().unwrap() = false;
     }
     
     fn pause(&self) {
-        todo!()
+        self.lock_actions().push(ReceivedInstruction::Pause);
+        *self.paused.lock().unwrap() = true;
     }
     
     fn is_paused(&self) -> bool {
-        todo!()
+        *self.paused.lock().unwrap()
     }
     
     fn skip_one(&self) {
-        todo!()
+        self.lock_actions().push(ReceivedInstruction::Skip);
     }
 
     fn stop(&self){
-        todo!()
+        self.lock_actions().push(ReceivedInstruction::Stop);
     }
 }
+
+#[cfg(test)]
+mod test;

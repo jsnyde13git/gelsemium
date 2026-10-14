@@ -51,13 +51,13 @@ impl Display for PlaylistCollection{
 
 // Holds a singular playlist, not including the name.
 pub struct Playlist{
-    data: Vec<PlaylistData>,
+    data: Vec<PlaylistSong>,
     name: String,
 }
 
 impl Playlist{
     #[must_use]
-    pub fn new(data: Vec<PlaylistData>, name: String) -> Self{
+    pub fn new(data: Vec<PlaylistSong>, name: String) -> Self{
         Self{
             data,
             name,
@@ -76,16 +76,14 @@ impl Playlist{
     fn to_strings(&self) -> Vec<String>{
         let mut strs = Vec::new();
         for data in &self.data{
-            if let PlaylistData::Path(p) = data{
-                strs.push(p.to_string_lossy().to_string());
-            }
+            strs.push(data.path.to_string_lossy().to_string());
         }
 
         strs
     }
 
     #[must_use]
-    pub fn raw_data(&self) -> &Vec<PlaylistData>{
+    pub fn raw_data(&self) -> &Vec<PlaylistSong>{
         &self.data
     }
 }
@@ -101,20 +99,33 @@ impl Display for Playlist{
     }
 }
 
-// Holds one line of the playlists file.
-// For now, this is either a file or a folder.
-// I may add the ability to add additional annotations, though.
-pub enum PlaylistData{
-    Path(PathBuf),
+// Holds one song in the playlists file.
+pub struct PlaylistSong{
+    path: PathBuf,
 }
 
-impl Display for PlaylistData{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self{
-            PlaylistData::Path(path) => {
-                write!(f, "{}", path.display())?;
-            }
+impl PlaylistSong{
+    #[must_use]
+    pub fn new(path: PathBuf) -> Self{
+        Self{
+            path
         }
+    }
+
+    #[must_use]
+    pub fn get_path(&self) -> &PathBuf{
+        &self.path
+    }
+
+    #[must_use]
+    pub fn into_path(self) -> PathBuf{
+        self.path
+    }
+}
+
+impl Display for PlaylistSong{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.path.display())?;
 
         Ok(())
     }

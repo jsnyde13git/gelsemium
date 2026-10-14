@@ -3,7 +3,7 @@ use std::fmt::Display;
 use std::io;
 use std::iter::{Iterator, Peekable};
 use std::path::{Path, PathBuf};
-use crate::playlist_data::{Playlist, PlaylistCollection, PlaylistData};
+use crate::playlist_data::{Playlist, PlaylistCollection, PlaylistSong};
 
 pub fn parse_playlists(
     playlist_str: &str,
@@ -96,14 +96,14 @@ fn parse_playlist_title(
 
 fn parse_playlist_songs(
     playlist_iter: &mut Peekable<impl Iterator<Item = (usize, usize, char)>>,
-) -> Vec<PlaylistData> {
+) -> Vec<PlaylistSong> {
     // Parse playlist songs until a [ is encountered at the start of a line,
     // or we reach the end of the file.
     let mut songs = Vec::new();
     while playlist_iter.peek().is_some_and(|(_, _, c)| *c != '[') {
         let song_maybe = parse_playlist_song(playlist_iter);
         if let Some(song) = song_maybe {
-            songs.push(PlaylistData::Path(PathBuf::from(song)));
+            songs.push(PlaylistSong::new(PathBuf::from(song)));
         }
     }
 

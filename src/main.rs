@@ -232,7 +232,6 @@ fn ui_on_play_playlist(
 ) {
     let ui = ui.unwrap();
     let playlists = playlists.lock().unwrap();
-    println!("{playlists}");
 
     let library = Rc::new(Library::get_library(&playlists));
     let library_model = ModelRc::new(library.clone());
