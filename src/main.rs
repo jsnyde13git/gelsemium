@@ -70,29 +70,9 @@ impl std::fmt::Display for StrError{
 }
 
 fn play_cli(playlist_name: &String) -> Result<(), PlayError> {
-    // let playlists_maybe = read_playlists();
-    // if let Err(err) = playlists_maybe{
-    //     eprintln!("Error reading playlists: {err}");
-    //     exit(1);
-    // }
-    // let playlists = playlists_maybe.unwrap();
-    // let playlists = match read_playlists() {
-    //     Ok(p) => p,
-    //     Err(err) => {
-    //         eprintln!("Error reading playlists: {err}");
-    //         exit(1);
-    //     }
-    // };
     let playlists = read_playlists()
         .map_err(PlayError::Playlist)?;
 
-    // Parse CLI args into a playlist name and access it.
-    // let playlist_filepaths_maybe = playlists.get(playlist_name.trim());
-    // if let None = playlist_filepaths_maybe {
-    //     eprintln!("No playlist with that name found.");
-    //     exit(1);
-    // }
-    // let playlist_filepaths = playlist_filepaths_maybe.unwrap();
     let playlist_filepaths = playlists.get(playlist_name.trim())
         .ok_or(PlayError::Playlist(Box::new(StrError{e: "No playlist with that name found.".to_string()})))?;
 
@@ -314,11 +294,11 @@ fn ui_on_play_playlist(
         // let user_queue_ref = user_queue_binding.as_any().downcast_ref::<VecDequeModel<SharedString>>().unwrap();
         // let file_song_queue_ref = file_song_queue_old.clone();
         let song_queue_ref = song_queue.clone();
-        ui.on_library_elem_clicked(move |index| {
+        ui.on_song_queued(move |index| {
             // False positive. 
             #[allow(clippy::cast_sign_loss)]
             let index = if index < 0{
-                eprintln!("Invalid index {index} passed to on_library_elem_clicked. This is a bug.");
+                eprintln!("Invalid index {index} passed to on_song_queued. This is a bug.");
                 return;
             }else {
                 std::cmp::max(0, index) as usize
@@ -357,14 +337,18 @@ fn ui_on_play_playlist(
     // And the back button.
     {
         let command_queue_copy = command_queue.clone();
-        ui.on_back_to_menu(move || ui_on_back_to_gui(&command_queue_copy));
+        ui.on_back_to_menu_from_playing(move || ui_on_back_to_gui_from_playing(&command_queue_copy));
     }
 
     println!("Playing {playlist_name}");
 }
 
-fn ui_on_back_to_gui(command_queue: &PlayerCommandQueue) {
+fn ui_on_back_to_gui_from_playing(command_queue: &PlayerCommandQueue) {
     command_queue.add_command(PlayerCommand::Stop);
+}
+
+fn ui_on_back_to_gui_from_editing(){
+    
 }
 
 fn read_playlists() -> Result<PlaylistCollection, Box<dyn Error>> {

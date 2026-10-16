@@ -1,4 +1,4 @@
-import { Button, VerticalBox, TextEdit, HorizontalBox, ScrollView, ListView } from "std-widgets.slint";
+import { Button, VerticalBox, TextEdit, HorizontalBox, ScrollView, ListView, LineEdit } from "std-widgets.slint";
 // import "./LeagueMono-VF.ttf";
 
 struct LibraryElem{
@@ -17,6 +17,9 @@ component SongLibrary inherits Rectangle{
         {name: "examplesong3", nest_level: 2, is_folder: false}, 
         {name: "examplesong4", nest_level: 0, is_folder: false}];
     background: #672b78;
+    in property<brush> elem_hover_color: #3a1644;
+    in property<brush> button_color: #fbb5fb;
+
     property<length> offset_per_nest: 20px;
     callback library_elem_clicked(int);
     callback library_add_clicked();
@@ -36,7 +39,7 @@ component SongLibrary inherits Rectangle{
                     accessible-label: song.name;
 
                     preferred-width: lib_width - parent.x;
-                    background: ta.has-hover ? #3a1644 : root.background;
+                    background: ta.has-hover ? elem_hover_color : root.background;
                     animate background {duration: 100ms;}
                     ta := TouchArea{
                         preferred-height: 100%;
@@ -56,8 +59,8 @@ component SongLibrary inherits Rectangle{
             padding: 2px;
             alignment: end;
             Image{
-                source: @image-url("skipbutton.svg");
-                colorize: #fbb5fb;
+                source: @image-url("plusbutton.svg");
+                colorize: button_color;
                 TouchArea{
                     clicked => library_add_clicked();
                 }
@@ -67,10 +70,14 @@ component SongLibrary inherits Rectangle{
 }
 
 component PlaylistEditListing inherits Rectangle{
+    callback song_removed_from_playlist(int);
+
     in property<[string]> song_list: ["examplesong1", "examplesong2"];
+    in property<brush> elem_hover_color: #3a1644;
+    in property<brush> button_color: #fbb5fb;
 
     ListView{
-        for song in song_list: Rectangle{
+        for song[i] in song_list: Rectangle{
             background: ta.has-hover ? #3a1644 : root.background;
             animate background {duration: 100ms;}
             ta := TouchArea{
@@ -82,10 +89,10 @@ component PlaylistEditListing inherits Rectangle{
                     // remove button (X)
                     Rectangle{}
                     Image{
-                        source: @image-url("skipbutton.svg");
-                        colorize: #fbb5fb;
+                        source: @image-url("xbutton.svg");
+                        colorize: button_color;
                         TouchArea{
-                            // clicked => skip();
+                            clicked => song_removed_from_playlist(i);
                         }
                     }
                 }
@@ -95,15 +102,60 @@ component PlaylistEditListing inherits Rectangle{
 }
 
 component EditMenu inherits Rectangle{
+    callback back_pressed();
+    callback song_added_to_playlist(int);
+    callback song_removed_from_playlist(int);
+    callback save();
+
+    background: bg_color;
+    in property<brush> bg_color: #f675f6;
+    in property<brush> elem_bg_color: #672b78;
+    in property<brush> button_color: #fbb5fb;
+    in property<brush> elem_hover_color: #3a1644;
+
     HorizontalBox{
         alignment: stretch;
-        PlaylistEditListing{
+        VerticalBox{
+            padding: 0;
             width: 50%;
-            background: #672b78;
+            HorizontalBox{
+                padding: 0;
+                // Back button
+                Image{
+                    source: @image-url("backbutton.svg");
+                    colorize: button_color;
+                    TouchArea{
+                        clicked => back_pressed();
+                    }
+                }
+                // Save button
+                Image{
+                    source: @image-url("skipbutton.svg");
+                    colorize: button_color;
+                    TouchArea{
+                        clicked => save();
+                    }
+                }
+                // Text input
+                Rectangle{                    
+                    background: elem_bg_color;
+                    LineEdit {
+                        width: 100%;
+                        placeholder-text: "Playlist Name";
+                        accepted(text) => {
+                            self.clear-focus()
+                        }
+                    }
+                }
+
+            }
+            PlaylistEditListing{
+                background: elem_bg_color;
+            }
         }
 
         SongLibrary{
-
+            library_elem_clicked(index) => song_added_to_playlist(index); 
         }
     }    
 }
@@ -237,11 +289,17 @@ component PlayingMenu inherits Rectangle{
     in property<[LibraryElem]> library;
     callback library_elem_clicked(int);
 
-    background: #f675f6;
+    // Color properties.
+    background: bg_color;
+    in property<brush> bg_color: #f675f6;
+    in property<brush> elem_bg_color: #672b78;
+    in property<brush> elem_color: #f74cf7;
+    in property<brush> elem_hover_color: #3a1644;
+    in property<brush> button_color: #fbb5fb;
 
     Image{
         source: @image-url("backbutton.svg");
-        colorize: #fbb5fb;
+        colorize: button_color;
         height: 30px;
         x: 5px;
         y: 5px;
@@ -271,6 +329,9 @@ component PlayingMenu inherits Rectangle{
                 normal_song_queue: playlist_queue;
                 immediate_queue: user_queue;
                 currently_playing: currently_playing;   
+
+                queue_background: elem_bg_color;
+                background: bg_color;
             }
         }
         
@@ -278,6 +339,8 @@ component PlayingMenu inherits Rectangle{
         SongLibrary {
             width: 50%;
             song_names: library;
+            elem_hover_color: elem_hover_color;
+            button_color: button_color;
             library_elem_clicked(index) => library_elem_clicked(index);
         }
     }
@@ -285,61 +348,89 @@ component PlayingMenu inherits Rectangle{
 
 component PlaylistPlayable inherits Rectangle{
     // width: 90%;
-    background: #f74cf7;
-    in property <string> playlist_name;
+    background: elem_color;
+    in property<brush> elem_color: #f74cf7;
+    in property<brush> button_color: #fbb5fb;
+    in property <string> playlist_name: "example playlist";
     callback play_clicked(string);
     callback edit_clicked(string);
 
     HorizontalBox{
+        padding: 0px;
         // name
-        Text{
-            font-family: "League Mono";
-            height: 70px;
-            text: playlist_name;
-            horizontal-alignment: left;
-            font-size: 36pt;
+        ScrollView{
+            content-height: self.height;
+            height: name.height;
+            content-width: name.width; 
+            name := Text{
+                font-family: "League Mono";
+                height: 70px;
+                text: playlist_name;
+                horizontal-alignment: left;
+                font-size: 36pt;
+            }
         }
-        // spacer
-        Rectangle{}
         // edit button
-        Image{
+        ebutton := Image{
             source: @image-url("settings.svg");
-            colorize: #fbb5fb;
+            colorize: button_color;
             TouchArea{
-                clicked => { root.edit_clicked(playlist_name); }
+                clicked => { edit_clicked(playlist_name); }
             }
         }
         // play button
-        Image{
+        pbutton := Image{
             source: @image-url("playbutton.svg");
-            colorize: #fbb5fb;
+            colorize: button_color;
             TouchArea{
-                clicked => { root.play_clicked(playlist_name); }
+                clicked => { play_clicked(playlist_name); }
             }
         }
     }
 }
 
 component SelectMenu inherits Rectangle{
-    background: #f675f6;
+    background: bg_color;
     in property<brush> elem_bg_color: #672b78;
     in property<brush> elem_color: #f74cf7;
+    in property<brush> bg_color: #f675f6;
+    in property<brush> button_color: #fbb5fb;
     callback play_clicked(string);
     callback edit_clicked(string);
+    callback new_playlist_clicked();
     in property<[string]> playlist_names: ["Example Playlist", "Example Playlist 2.0"];
 
-    Rectangle {
-        width: 50%;
+    Rectangle{
+        width: max(50%*root.width, 200px);
+        // width: 150px;
         height: 80%;
         background: elem_bg_color;
-        VerticalBox{
-            alignment: start;
-            for playlist_name in playlist_names: 
-                PlaylistPlayable{
-                    background: elem_color;
-                    playlist_name: playlist_name;
-                    play_clicked(s) => play_clicked(s);
-                    edit_clicked(s) => edit_clicked(s);
+        VerticalBox {
+            padding: 0px;
+            ScrollView{
+                content-width: self.visible-width;
+                VerticalBox{
+                    alignment: start;
+                    for playlist_name in playlist_names: 
+                        PlaylistPlayable{
+                            background: elem_color;
+                            button_color: button_color;
+                            playlist_name: playlist_name;
+                            play_clicked(s) => play_clicked(s);
+                            edit_clicked(s) => edit_clicked(s);
+                    }
+                }
+            }
+            HorizontalBox{
+                padding: 0;
+                alignment: end;
+                Image{
+                    source: @image-url("plusbutton.svg");
+                    colorize: button_color;
+                    TouchArea{
+                        clicked => { new_playlist_clicked(); }
+                    }
+                }
             }
         }
     }
@@ -352,8 +443,8 @@ export component AppWindow inherits Window {
     callback volume_up();
     callback volume_down();
     callback skip();
-    callback library_elem_clicked(int);
-    callback back_to_menu();
+    callback song_queued(int);
+    callback back_to_menu_from_playing();
     in property <[string]> playlist_queue;
     in property <[string]> user_queue;
     in property <string> currently_playing;
@@ -365,6 +456,10 @@ export component AppWindow inherits Window {
     in property <[string]> playlist_names: ["Example Playlist", "Example Playlist 2.0"];
 
     // For the PlaylistEdit state.
+    callback back_to_menu_from_editing();
+    callback song_added_to_playlist(int);
+    callback song_removed_from_playlist(int);
+    callback save();
 
     // General properties.
     title: "Gelsemium Music Player";
@@ -374,6 +469,7 @@ export component AppWindow inherits Window {
     property<brush> bg_color: #f675f6;
     property<brush> elem_bg_color: #672b78;
     property<brush> elem_color: #f74cf7;
+    property<brush> elem_hover_color: #3a1644;
     property<brush> button_color: #fbb5fb;
 
     property <ScreenState> state: select;
@@ -381,6 +477,7 @@ export component AppWindow inherits Window {
         background: bg_color;
         elem_bg_color: elem_bg_color;
         elem_color: elem_color;
+        button_color: button_color;
 
         playlist_names: playlist_names;
         play_clicked(playlist_name) => {
@@ -397,17 +494,26 @@ export component AppWindow inherits Window {
         user_queue: user_queue;
         currently_playing: currently_playing;
         library: library;
+
+        background: bg_color;
+        elem_bg_color: elem_bg_color;
+        elem_color: elem_color;
+        elem_hover_color: elem_hover_color;
+        button_color: button_color;
+
         skip => skip();
         pause => pause();
-        library_elem_clicked(index) => library_elem_clicked(index);
+        library_elem_clicked(index) => song_queued(index);
         back_to_menu => {
             state = ScreenState.select;
-            back_to_menu();
+            back_to_menu_from_playing();
         }
     }
     if state == ScreenState.editing: edit_menu := EditMenu{
-        
+        background: bg_color;
+        back_pressed => {
+            state = ScreenState.select;
+            back_to_menu_from_editing();
+        }
     }
 }
-
-

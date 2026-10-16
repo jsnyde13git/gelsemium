@@ -48,37 +48,36 @@
      inkscape:groupmode="layer"
      id="layer1">
     <rect
-       style="fill:#000000;fill-opacity:1;stroke:none;stroke-width:8.13552;stroke-opacity:1"
+       style="fill:#000000;fill-opacity:1;stroke:none;stroke-width:9.30688;stroke-opacity:1"
        id="rect1"
        width="25.898726"
-       height="3.4419291"
-       x="5.053637"
-       y="14.209"
+       height="4.5044289"
+       x="5.428637"
+       y="13.6465"
        ry="0" />
     <rect
-       style="fill:#000000;fill-opacity:1;stroke:none;stroke-width:10.3195;stroke-opacity:1"
+       style="fill:#000000;fill-opacity:1;stroke:#000000;stroke-width:1.61577;stroke-dasharray:none;stroke-opacity:1"
        id="rect2"
        width="17.495342"
        height="3.398623"
-       x="-6.0331087"
-       y="13.987322"
+       x="-5.684258"
+       y="13.800849"
        ry="0"
        rx="0"
        transform="matrix(0.80269021,-0.59639619,0.56070186,0.82801777,0,0)" />
     <rect
-       style="fill:#000000;fill-opacity:1;stroke:none;stroke-width:10.3195;stroke-opacity:1"
+       style="fill:#000000;fill-opacity:1;stroke:#000000;stroke-width:1.61577;stroke-dasharray:none;stroke-opacity:1"
        id="rect2-3"
        width="17.495342"
        height="3.398623"
-       x="11.860158"
-       y="-11.628341"
+       x="12.056029"
+       y="-11.774159"
        ry="0"
        rx="0"
        transform="matrix(0.80269021,0.59639619,0.56070186,-0.82801777,0,0)" />
     <path
        id="rect2-3-3"
-       style="fill:#000000;fill-opacity:1;stroke:none;stroke-width:10.3195;stroke-opacity:1"
-       d="M 11.823689 -8.2146937 L 10.650672 -11.614159 L 18.716772 -11.614105 L 18.717112 -8.2148354 L 11.823689 -8.2146937 z "
-       transform="matrix(0.80269021,0.59639619,0.56070186,-0.82801777,0,0)" />
+       style="fill:#000000;fill-opacity:1;stroke:#000000;stroke-width:1.615;stroke-dasharray:none;stroke-opacity:1"
+       d="M 4.5597439,13.791015 1.7120881,15.90625 8.1866979,20.716797 10.092947,17.902344 Z" />
   </g>
 </svg>
