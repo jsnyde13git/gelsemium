@@ -453,6 +453,7 @@ export component AppWindow inherits Window {
     // For the PlaylistSelect state.
     callback play_playlist(string);
     callback edit_playlist(string);
+    callback add_new_playlist();
     in property <[string]> playlist_names: ["Example Playlist", "Example Playlist 2.0"];
 
     // For the PlaylistEdit state.
@@ -487,6 +488,10 @@ export component AppWindow inherits Window {
         edit_clicked(playlist_name) => {
             state = ScreenState.editing;
             edit_playlist(playlist_name);
+        }
+        new_playlist_clicked() => {
+            state = ScreenState.editing;
+            add_new_playlist();
         }
     }
     if state == ScreenState.playing: playing_menu := PlayingMenu{
