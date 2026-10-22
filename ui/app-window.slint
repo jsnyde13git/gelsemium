@@ -72,7 +72,8 @@ component SongLibrary inherits Rectangle{
 component PlaylistEditListing inherits Rectangle{
     callback song_removed_from_playlist(int);
 
-    in property<[string]> song_list: ["examplesong1", "examplesong2"];
+    // in property<[string]> song_list: ["examplesong1", "examplesong2"];
+    in property<[string]> song_list: [];
     in property<brush> elem_hover_color: #3a1644;
     in property<brush> button_color: #fbb5fb;
 
@@ -155,6 +156,7 @@ component EditMenu inherits Rectangle{
         }
 
         SongLibrary{
+            song_names: [];
             library_elem_clicked(index) => song_added_to_playlist(index); 
         }
     }    
