@@ -8,7 +8,6 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, sync_channel};
 use std::sync::{Arc, Barrier, Condvar, Mutex};
-use std::time::Duration;
 use rodio::decoder::DecoderBuilder;
 use rodio::{Decoder, Source};
 use slint::{Model, ModelNotify, ModelRc, SharedString};
@@ -32,7 +31,7 @@ pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
     let (sender, receiver) = sync_channel(1);
     let player_copy = player.clone();
     let queue_copy = command_queue.clone();
-    std::thread::spawn(move || append_thread(&*player_copy, &*queue_copy, receiver));
+    std::thread::spawn(move || append_thread(&*player_copy, &queue_copy, &receiver));
     #[expect(clippy::missing_panics_doc, reason = "infallible if and only if no other thread panics")]
     while let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()} {
         // song_queue.lock().unwrap().next();
@@ -43,9 +42,9 @@ pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
 
         match decode_song(&filepath){
             Ok(source) => {
-                sender.send((source, filepath));
-                let player_copy = player.clone();
-                let cmd_queue_copy = command_queue.clone();
+                let _ = sender.send((source, filepath));
+                // let player_copy = player.clone();
+                // let cmd_queue_copy = command_queue.clone();
                 // println!("Playing {}", filepath.display());
                 // std::thread::spawn(move || {
                 //     player_copy.append(source, filepath);
@@ -84,11 +83,11 @@ pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
             while let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()}{
                 match decode_song(&filepath){
                     Ok(source) => {   
-                        let player_copy = player.clone();
-                        let cmd_queue_copy = command_queue.clone();
+                        // let player_copy = player.clone();
+                        // let cmd_queue_copy = command_queue.clone();
                         // std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
                         println!("queue sending {}", filepath.display());
-                        sender.send((source, filepath));
+                        let _ = sender.send((source, filepath));
                         break;
                     }
                     Err(err) => {
@@ -118,11 +117,11 @@ pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
         while let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()}{
             match decode_song(&filepath){
                 Ok(source) => {   
-                    let player_copy = player.clone();
-                    let cmd_queue_copy = command_queue.clone();
+                    // let player_copy = player.clone();
+                    // let cmd_queue_copy = command_queue.clone();
                     // std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
                     println!("normal sending {}", filepath.display());
-                    sender.send((source, filepath));
+                    let _ = sender.send((source, filepath));
                     break;
                 }
                 Err(err) => {
@@ -215,6 +214,7 @@ enum WaitResult{
 //     player.append(source);
 // }
 
+#[allow(clippy::missing_errors_doc)]
 pub fn decode_song(filepath: &Path) -> Result<Decoder<BufReader<File>>, DecodingError>{
     // Open file.
     let file = match File::open(filepath) {
@@ -265,7 +265,7 @@ impl Display for DecodingError{
 //     cmd_queue.add_command(PlayerCommand::SongFinished);
 // }
 
-fn append_thread<T: PlayerInterface, S: Source + Send + 'static>(player: &T, cmd_queue: &PlayerCommandQueue, channel: Receiver<(S, PathBuf)>){
+fn append_thread<T: PlayerInterface, S: Source + Send + 'static>(player: &T, cmd_queue: &PlayerCommandQueue, channel: &Receiver<(S, PathBuf)>){
     while let Ok((source, path)) = channel.recv(){
         player.append(source, path.clone());
         println!("Playing {}", path.display());
@@ -538,17 +538,16 @@ impl PlayerInterface for rodio::Player{
 struct FakePlayer{
     received_actions: Mutex<Vec<ReceivedInstruction>>,
     paused: Mutex<bool>,
-    delay: Duration,
     // True if it can be activated the moment test unlocks.
     // False if it still needs to wait for test.
     // sleep_lock: Mutex<bool>,
     sleep_barrier: Arc<Barrier>,
 }
  
-/// Received instructions for FakePlayer.
+/// Received instructions for `FakePlayer`.
 enum ReceivedInstruction
 {
-    Append{source: Mutex<Box<dyn rodio::Source + Send + 'static>>, path: PathBuf},
+    Append{path: PathBuf},
     Play,
     Pause,
     Skip,
@@ -558,7 +557,7 @@ enum ReceivedInstruction
 impl PartialEq for ReceivedInstruction{
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Append { source: _, path: l_path }, Self::Append { source: _, path: r_path }) => l_path == r_path,
+            (Self::Append { path: l_path }, Self::Append { path: r_path }) => l_path == r_path,
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
     }
@@ -567,7 +566,7 @@ impl PartialEq for ReceivedInstruction{
 impl std::fmt::Debug for ReceivedInstruction{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Append { source, path } => f.debug_struct("Append").field("path", path).finish(),
+            Self::Append { path } => f.debug_struct("Append").field("path", path).finish(),
             Self::Play => write!(f, "Play"),
             Self::Pause => write!(f, "Pause"),
             Self::Skip => write!(f, "Skip"),
@@ -577,11 +576,12 @@ impl std::fmt::Debug for ReceivedInstruction{
 }
 
 impl FakePlayer{
+    // Used within tests.
+    #[allow(unused)]
     fn new(barrier: Arc<Barrier>) -> Self{
         Self { 
             received_actions: Mutex::new(Vec::new()), 
             paused: Mutex::new(false),
-            delay: Duration::new(0, 0),
             sleep_barrier: barrier,
         }
     }
@@ -595,7 +595,9 @@ impl FakePlayer{
     //     }
     // }
 
-    fn lock_actions<'a>(&'a self) -> std::sync::MutexGuard<'a, Vec<ReceivedInstruction>>{
+    // Used *extensively* within the PlayerInterface impl.
+    #[allow(unused)]
+    fn lock_actions(&self) -> std::sync::MutexGuard<'_, Vec<ReceivedInstruction>>{
         self.received_actions.lock().unwrap()
     }
  
@@ -618,10 +620,9 @@ impl PlayerInterface for FakePlayer{
         // std::thread::sleep(self.delay)
     }
 
-    fn append<S>(&self, source: S, path: PathBuf) where S: rodio::Source + Send + 'static{
+    fn append<S>(&self, _: S, path: PathBuf) where S: rodio::Source + Send + 'static{
         self.lock_actions().push(
             ReceivedInstruction::Append { 
-                source: Mutex::new(Box::new(source)), 
                 path 
         });
     }

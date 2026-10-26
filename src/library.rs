@@ -153,7 +153,7 @@ impl Library {
         for filepath_str in library_paths.raw_data(){
             let path = filepath_str.get_path();
             if path.is_dir(){
-                let (folder_maybe, _) = Self::expand_library_dir(path, 0);
+                let (folder_maybe, _) = Self::expand_library_dir(path);
                 if let Some(folder) = folder_maybe{
                     subfolders.push(Box::new(folder));
                 }
@@ -183,7 +183,7 @@ impl Library {
     // Assumes a directory has been received.
     // If a non-directory is passed (or the filesystem has some weird error),
     // returns None instead of a LibraryFolder.
-    fn expand_library_dir(dir: &Path, layer: i32) -> (Option<LibraryFolder>, Vec<io::Error>) {
+    fn expand_library_dir(dir: &Path) -> (Option<LibraryFolder>, Vec<io::Error>) {
         let dir_contents = if dir.is_dir() {
             match dir.read_dir() {
                 Ok(contents) => contents,
@@ -235,7 +235,7 @@ impl Library {
         // Recursively call this on all directories.
         let mut subfolders = Vec::new();
         for dir in dirs {
-            let (folder_maybe, mut errors) = Self::expand_library_dir(&dir, layer);
+            let (folder_maybe, mut errors) = Self::expand_library_dir(&dir);
             errs.append(&mut errors);
             if let Some(folder) = folder_maybe {
                 subfolders.push(Box::new(folder));

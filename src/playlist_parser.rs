@@ -31,6 +31,7 @@ pub fn parse_playlists(
     return Ok(playlists);
 }
 
+#[allow(clippy::missing_errors_doc)]
 fn parse_playlist(
     playlist_iter: &mut Peekable<impl Iterator<Item = (usize, usize, char)>>,
 ) -> Result<Playlist, PlaylistParseError> {
