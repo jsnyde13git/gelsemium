@@ -6,25 +6,33 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::mpsc::{Receiver, sync_channel};
+use std::sync::{Arc, Barrier, Condvar, Mutex};
+use std::time::Duration;
 use rodio::decoder::DecoderBuilder;
-use rodio::{Decoder};
+use rodio::{Decoder, Source};
 use slint::{Model, ModelNotify, ModelRc, SharedString};
 
 // Allowed because it triggers on the Arcs, which while *technically* don't
-// need to be passed by reference, I don't think there's really a lot of
+// need to be passed by value, I don't think there's really a lot of
 // benefit to changing it.
 #[allow(clippy::needless_pass_by_value)]
-pub fn play_file_list<T: 'static + PlayerInterface>(
+pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
     player: Arc<T>,
     song_queue: Arc<Mutex<SongQueue>>,
     // ui_queue: Arc<Mutex<SongQueueOld>>,
     song_finished: &dyn Fn(),
+    decode_song: &dyn Fn(&Path) -> Result<S, DecodingError>,
     command_queue: Arc<PlayerCommandQueue>,
 ) {
     // Put one song in the queue before the main loop.
     // That way we'll always have two songs in the queue, letting us do gapless. (Hopefully)
     // Not the best code I've written but a little break is fine in a short thing I'm sure.
+    // TODO verify that the channel method works
+    let (sender, receiver) = sync_channel(1);
+    let player_copy = player.clone();
+    let queue_copy = command_queue.clone();
+    std::thread::spawn(move || append_thread(&*player_copy, &*queue_copy, receiver));
     #[expect(clippy::missing_panics_doc, reason = "infallible if and only if no other thread panics")]
     while let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()} {
         // song_queue.lock().unwrap().next();
@@ -35,14 +43,15 @@ pub fn play_file_list<T: 'static + PlayerInterface>(
 
         match decode_song(&filepath){
             Ok(source) => {
+                sender.send((source, filepath));
                 let player_copy = player.clone();
                 let cmd_queue_copy = command_queue.clone();
-                println!("Playing {}", filepath.display());
-                std::thread::spawn(move || {
-                    player_copy.append(source, filepath);
-                    player_copy.sleep_until_end();
-                    cmd_queue_copy.add_command(PlayerCommand::SongFinished);
-                });
+                // println!("Playing {}", filepath.display());
+                // std::thread::spawn(move || {
+                //     player_copy.append(source, filepath);
+                //     player_copy.sleep_until_end();
+                //     cmd_queue_copy.add_command(PlayerCommand::SongFinished);
+                // });
                 #[expect(clippy::missing_panics_doc, reason = "infallible if and only if no other thread panics")]
                 song_queue.lock().unwrap().advance();
 
@@ -77,7 +86,9 @@ pub fn play_file_list<T: 'static + PlayerInterface>(
                     Ok(source) => {   
                         let player_copy = player.clone();
                         let cmd_queue_copy = command_queue.clone();
-                        std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
+                        // std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
+                        println!("queue sending {}", filepath.display());
+                        sender.send((source, filepath));
                         break;
                     }
                     Err(err) => {
@@ -109,7 +120,9 @@ pub fn play_file_list<T: 'static + PlayerInterface>(
                 Ok(source) => {   
                     let player_copy = player.clone();
                     let cmd_queue_copy = command_queue.clone();
-                    std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
+                    // std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
+                    println!("normal sending {}", filepath.display());
+                    sender.send((source, filepath));
                     break;
                 }
                 Err(err) => {
@@ -121,7 +134,8 @@ pub fn play_file_list<T: 'static + PlayerInterface>(
         }
         
         // song_finished();
-        command_queue.take_commands();
+        // TODO verify this is fine
+        // command_queue.take_commands();
         last_result = wait_for_command(&command_queue, &*player, &song_queue, song_finished);
         // {song_queue.lock().unwrap().advance()};
     }
@@ -201,7 +215,7 @@ enum WaitResult{
 //     player.append(source);
 // }
 
-fn decode_song(filepath: &Path) -> Result<Decoder<BufReader<File>>, DecodingError>{
+pub fn decode_song(filepath: &Path) -> Result<Decoder<BufReader<File>>, DecodingError>{
     // Open file.
     let file = match File::open(filepath) {
         Ok(f) => BufReader::new(f),
@@ -227,7 +241,7 @@ fn decode_song(filepath: &Path) -> Result<Decoder<BufReader<File>>, DecodingErro
 }
 
 #[derive(Debug)]
-enum DecodingError{
+pub enum DecodingError{
     FileError(std::io::Error),
     DecodingError(rodio::decoder::DecoderError),
 }
@@ -242,13 +256,22 @@ impl Display for DecodingError{
     }
 }
 
-fn append_and_wait<T: PlayerInterface>(player: &T, source: Decoder<BufReader<File>>, path: &Path, cmd_queue: &PlayerCommandQueue){
-    player.append(source, path.to_owned());
-    // I'm not sure this works or will be stable.
-    println!("Playing {}", path.display());
-    player.sleep_until_end();
-    // println!("finished sleeping {}", path.display());
-    cmd_queue.add_command(PlayerCommand::SongFinished);
+// fn append_and_wait<T: PlayerInterface, S: Source + Send + 'static>(player: &T, source: S, path: &Path, cmd_queue: &PlayerCommandQueue){
+//     player.append(source, path.to_owned());
+//     // I'm not sure this works or will be stable.
+//     println!("Playing {}", path.display());
+//     player.sleep_until_end();
+//     // println!("finished sleeping {}", path.display());
+//     cmd_queue.add_command(PlayerCommand::SongFinished);
+// }
+
+fn append_thread<T: PlayerInterface, S: Source + Send + 'static>(player: &T, cmd_queue: &PlayerCommandQueue, channel: Receiver<(S, PathBuf)>){
+    while let Ok((source, path)) = channel.recv(){
+        player.append(source, path.clone());
+        println!("Playing {}", path.display());
+        player.sleep_until_end();
+        cmd_queue.add_command(PlayerCommand::SongFinished);
+    }
 }
 
 // /// Meant to run in a separate thread.
@@ -515,6 +538,11 @@ impl PlayerInterface for rodio::Player{
 struct FakePlayer{
     received_actions: Mutex<Vec<ReceivedInstruction>>,
     paused: Mutex<bool>,
+    delay: Duration,
+    // True if it can be activated the moment test unlocks.
+    // False if it still needs to wait for test.
+    // sleep_lock: Mutex<bool>,
+    sleep_barrier: Arc<Barrier>,
 }
  
 /// Received instructions for FakePlayer.
@@ -527,15 +555,67 @@ enum ReceivedInstruction
     Stop,
 }
 
+impl PartialEq for ReceivedInstruction{
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Append { source: _, path: l_path }, Self::Append { source: _, path: r_path }) => l_path == r_path,
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
+}
+
+impl std::fmt::Debug for ReceivedInstruction{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Append { source, path } => f.debug_struct("Append").field("path", path).finish(),
+            Self::Play => write!(f, "Play"),
+            Self::Pause => write!(f, "Pause"),
+            Self::Skip => write!(f, "Skip"),
+            Self::Stop => write!(f, "Stop"),
+        }
+    }
+}
+
 impl FakePlayer{
+    fn new(barrier: Arc<Barrier>) -> Self{
+        Self { 
+            received_actions: Mutex::new(Vec::new()), 
+            paused: Mutex::new(false),
+            delay: Duration::new(0, 0),
+            sleep_barrier: barrier,
+        }
+    }
+
+    // fn new_with_dur(delay: Duration) -> Self{
+    //     Self { 
+    //         received_actions: Mutex::new(Vec::new()), 
+    //         paused: Mutex::new(false),
+    //         delay, 
+    //         sleep_lock: Mutex::new(false), 
+    //     }
+    // }
+
     fn lock_actions<'a>(&'a self) -> std::sync::MutexGuard<'a, Vec<ReceivedInstruction>>{
         self.received_actions.lock().unwrap()
     }
+ 
 }
 
 impl PlayerInterface for FakePlayer{
     fn sleep_until_end(&self){
-        todo!()
+        // Wait for the lock to both be open *and* True.
+        // let mut done = false;
+        // while !done{
+        //     let mut lock = self.sleep_lock.lock().unwrap();
+        //     if *lock{
+        //         done = true;
+        //         *lock = false;
+        //     }
+        // }
+        self.sleep_barrier.wait();
+        self.sleep_barrier.wait();
+        // let _a = self.sleep_lock.lock();
+        // std::thread::sleep(self.delay)
     }
 
     fn append<S>(&self, source: S, path: PathBuf) where S: rodio::Source + Send + 'static{

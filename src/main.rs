@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use gelsemium::player::{PlayerCommand, PlayerCommandQueue, SongQueue, VecDequeModel, create_song_models, play_file_list};
+use gelsemium::player::{self, PlayerCommand, PlayerCommandQueue, SongQueue, VecDequeModel, create_song_models, play_file_list};
 use gelsemium::playlist_parser::{is_valid_filetype, parse_playlists};
 use gelsemium::playlist_parser::{ExpandDirOptions};
 use gelsemium::ui::{AppWindow};
@@ -106,7 +106,8 @@ fn play_cli(playlist_name: &String) -> Result<(), PlayError> {
         player,
         // Arc::new(Mutex::new(filepaths.into_iter())),
         Arc::new(Mutex::new(playlist_paths)),
-        &||{}, 
+        &||{},
+        &player::decode_song, 
         command_queue,
     );
     Ok(())
@@ -280,6 +281,7 @@ fn ui_on_play_playlist(
                 song_queue_ref,
                 // visual_song_queue_ref,
                 &song_finished_closure,
+                &player::decode_song, 
                 command_queue_player,
             );
         });
