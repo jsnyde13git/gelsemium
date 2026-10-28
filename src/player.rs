@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::mpsc::{Receiver, sync_channel};
+use std::sync::mpsc::{Receiver, RecvError, Sender, SyncSender, sync_channel};
 use std::sync::{Arc, Barrier, Condvar, Mutex};
 use rodio::decoder::DecoderBuilder;
 use rodio::{Decoder, Source};
@@ -42,7 +42,7 @@ pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
 
         match decode_song(&filepath){
             Ok(source) => {
-                let _ = sender.send((source, filepath));
+                let _ = sender.send(AppendThreadCommand::Queue(source, filepath));
                 // let player_copy = player.clone();
                 // let cmd_queue_copy = command_queue.clone();
                 // println!("Playing {}", filepath.display());
@@ -79,6 +79,9 @@ pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
             //     let source = decode_song(&filepath).unwrap();
             //     std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
             // }
+            // println!("queue immediate handling");
+            // println!("sending skip");
+            let _ = sender.send(AppendThreadCommand::Skip);
             #[expect(clippy::missing_panics_doc, reason = "infallible if and only if no other thread panics")]
             while let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()}{
                 match decode_song(&filepath){
@@ -87,7 +90,7 @@ pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
                         // let cmd_queue_copy = command_queue.clone();
                         // std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
                         println!("queue sending {}", filepath.display());
-                        let _ = sender.send((source, filepath));
+                        let _ = sender.send(AppendThreadCommand::Queue(source, filepath));
                         break;
                     }
                     Err(err) => {
@@ -101,6 +104,7 @@ pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
             #[expect(clippy::missing_panics_doc, reason = "infallible if and only if no other thread panics")]
             song_queue.lock().unwrap().advance();
             song_finished();
+            command_queue.take_commands();
         }
 
         // Only append & wait if there's another song in the queue.
@@ -121,7 +125,7 @@ pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
                     // let cmd_queue_copy = command_queue.clone();
                     // std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
                     println!("normal sending {}", filepath.display());
-                    let _ = sender.send((source, filepath));
+                    let _ = sender.send(AppendThreadCommand::Queue(source, filepath));
                     break;
                 }
                 Err(err) => {
@@ -135,9 +139,11 @@ pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
         // song_finished();
         // TODO verify this is fine
         // command_queue.take_commands();
-        last_result = wait_for_command(&command_queue, &*player, &song_queue, song_finished);
+        println!("about to wait for commands");
+        last_result = wait_for_command(&command_queue, &*player, &song_queue, song_finished, &sender);
         // {song_queue.lock().unwrap().advance()};
     }
+    std::mem::drop(sender);
     player.stop();
     // Ensure the player is in the playing state before exiting.
     // If this isn't done, then in GUI mode it'll still be paused
@@ -149,7 +155,7 @@ pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
 }
 
 // Returns true if we should stop playing.
-fn wait_for_command<T: PlayerInterface>(command_queue: &PlayerCommandQueue, player: &T, song_queue: &Mutex<SongQueue>, song_finished: &dyn Fn()) -> WaitResult{
+fn wait_for_command<T: PlayerInterface, S: Source + Send + 'static>(command_queue: &PlayerCommandQueue, player: &T, song_queue: &Mutex<SongQueue>, song_finished: &dyn Fn(), sender: &SyncSender<AppendThreadCommand<S>>) -> WaitResult{
     use WaitResult::{Stop, QueuedImmediate, Ok};
     // Read commands. If Skip or SongFinished appears, move to the next song.
     // Note that Skip, since it skips one and we only ever have one in the queue,
@@ -159,6 +165,7 @@ fn wait_for_command<T: PlayerInterface>(command_queue: &PlayerCommandQueue, play
     while !next_song {
         command_queue.wait_for_command();
         let cmds = command_queue.take_commands();
+        println!("received commands {cmds:?}");
         for cmd in cmds {
             match cmd {
                 PlayerCommand::Pause => {
@@ -176,7 +183,7 @@ fn wait_for_command<T: PlayerInterface>(command_queue: &PlayerCommandQueue, play
                 PlayerCommand::SongFinished => {
                     next_song = true;
                     if queued_immediate{
-                        player.skip_one();
+                        // player.skip_one();
                     }else{
                         song_queue.lock().unwrap().advance();
                         song_finished();
@@ -265,12 +272,153 @@ impl Display for DecodingError{
 //     cmd_queue.add_command(PlayerCommand::SongFinished);
 // }
 
-fn append_thread<T: PlayerInterface, S: Source + Send + 'static>(player: &T, cmd_queue: &PlayerCommandQueue, channel: &Receiver<(S, PathBuf)>){
-    while let Ok((source, path)) = channel.recv(){
-        player.append(source, path.clone());
-        println!("Playing {}", path.display());
-        player.sleep_until_end();
-        cmd_queue.add_command(PlayerCommand::SongFinished);
+enum AppendThreadCommand<S: Source + Send + 'static>{
+    Queue(S, PathBuf),
+    Skip,
+}
+
+impl<S: Source + Send + 'static> std::fmt::Debug for AppendThreadCommand<S>{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Queue(arg0, arg1) => f.debug_tuple("Queue").field(arg1).finish(),
+            Self::Skip => write!(f, "Skip"),
+        }
+    }
+}
+
+fn append_thread<T: PlayerInterface, S: Source + Send + 'static>(player: &T, cmd_queue: &PlayerCommandQueue, channel: &Receiver<AppendThreadCommand<S>>){
+    // if let Ok(cmd) = channel.recv(){
+    //     if let AppendThreadCommand::Queue(source, path) = cmd{
+    //         player.append(source, path.clone());
+    //         println!("Playing {}", path.display());
+    //     }
+    // }
+    // player.sleep_until_end();
+    // cmd_queue.add_command(PlayerCommand::SongFinished);
+    // let mut immediate_queueing = false;
+    // while let Ok(cmd) = channel.recv(){
+    //     match cmd{
+    //         AppendThreadCommand::Queue(source, path) => {
+    //             player.append(source, path.clone());
+    //             println!("Playing {}", path.display());
+
+    //             if let Ok(cmd) = channel.recv(){
+
+    //             }
+    //             // player.sleep_until_end();
+    //             // if !immediate_queueing{
+    //             //     cmd_queue.add_command(PlayerCommand::SongFinished);
+    //             // }else{
+    //             //     immediate_queueing = false;
+    //             // }
+    //             // player.append(source, path.clone());
+    //             // println!("Playing {}", path.display());
+    //         }
+    //         AppendThreadCommand::Skip => {
+    //             println!("skip received");
+    //             player.skip_one();
+
+    //             if let Ok(cmd) = channel.recv(){
+    //                 if let AppendThreadCommand::Queue(source, path) = cmd{
+    //                     player.append(source, path.clone());
+    //                     println!("Playing2 {}", path.display());
+    //                     // player.sleep_until_end();
+    //                     // cmd_queue.add_command(PlayerCommand::SongFinished);
+    //                 }
+    //             }
+                
+    //             immediate_queueing = true;
+    //             // cmd_queue.add_command(PlayerCommand::SongFinished);
+    //         }
+    //     }
+    //     player.sleep_until_end();
+    //     cmd_queue.add_command(PlayerCommand::SongFinished);
+    // }
+
+    // let mut iter = channel.iter().peekable();
+    // if let Ok(cmd) = channel.recv(){
+    //     match(cmd){
+    //         AppendThreadCommand::Queue(source, path) => {
+    //             player.append(source, path.clone());
+    //             println!("Playing {}", path.display());
+    //         }
+    //         AppendThreadCommand::Skip => {
+
+    //         }
+    //     }
+    // }
+
+    let mut songs_in_queue = 0;
+    let mut next = channel.recv();
+
+    while let Ok(cmd) = next{
+        println!("received: {cmd:?}");
+        match cmd{
+            AppendThreadCommand::Queue(source, path) => {
+                println!("Appending {}", path.display());
+                player.append(source, path.clone());
+                songs_in_queue += 1;
+                println!("Playing {}", path.display());
+
+                // The error in queue test (and perhaps other tests) is here
+                // It tries to wait for iter.peek() but there won't be anything there
+                // Try doing a custom iterator style thing here,
+                // in particular using try_iter()
+                // let x = channel.recv();
+                // if let Some(AppendThreadCommand::Queue(_, _)) = iter.peek(){
+                //     player.sleep_until_end();
+                //     cmd_queue.add_command(PlayerCommand::SongFinished);
+                // } else if let None = iter.peek(){
+                //     player.sleep_until_end();
+                //     cmd_queue.add_command(PlayerCommand::SongFinished);
+                // }
+                // If the channel has a Skip ready, don't wait. Otherwise do.
+                let peek = channel.try_recv();
+                match peek{
+                    Ok(cmd) => {
+                        println!("received: {cmd:?}");
+                        match cmd{
+                            AppendThreadCommand::Queue(source, path) =>{
+                                next = Ok(AppendThreadCommand::Queue(source, path));
+                                if songs_in_queue > 1{
+                                    println!("eepin_queue");
+                                    player.sleep_until_end();
+                                    cmd_queue.add_command(PlayerCommand::SongFinished);
+                                    songs_in_queue += -1;
+                                }
+                            }
+                            AppendThreadCommand::Skip =>{
+                                next = channel.recv();
+                                player.skip_one();
+                                cmd_queue.add_command(PlayerCommand::SongFinished);
+                                songs_in_queue += -1;
+                            }
+                        }
+                        // player.sleep_until_end();
+                        // next = channel.recv();
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) =>{
+                        next = Err(RecvError);
+                        player.stop();
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        // Wait
+                        if songs_in_queue > 1{  
+                            println!("eepin_empty");
+                            player.sleep_until_end();
+                            println!("woke up from empty");
+                            cmd_queue.add_command(PlayerCommand::SongFinished);
+                        }
+                        next = channel.recv();
+                    }
+                }
+            }
+            AppendThreadCommand::Skip => {
+                player.skip_one();
+                next = channel.recv();
+                songs_in_queue += -1;
+            }
+        }
     }
 }
 

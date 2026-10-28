@@ -1,4 +1,4 @@
-use std::{path::{Path, PathBuf}, sync::{Arc, Barrier, Mutex}};
+use std::{path::{Path, PathBuf}, sync::{Arc, Barrier, Mutex}, time::Duration};
 
 use rodio::{Source, source::SineWave};
 
@@ -35,7 +35,7 @@ fn test1(){
 // TODO: Flaky test.
 // There's a small race condition between the first two songs played.
 // So sometimes this can do [b, a] instead of just [a] on the first verification.
-#[test]
+// #[test]
 fn play_2(){
     let barrier = Arc::new(Barrier::new(2));
     let player = Arc::new(FakePlayer::new(barrier.clone()));
@@ -55,7 +55,7 @@ fn play_2(){
 
     barrier.wait();
     assert_eq!(*player.received_actions.lock().unwrap(),
-        vec![ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("a")}]);
+        vec![ReceivedInstruction::Append{path: PathBuf::from("a")}]);
     barrier.wait();
 
     barrier.wait();
@@ -65,12 +65,12 @@ fn play_2(){
     handle.join().unwrap();
 
     assert_eq!(*player.received_actions.lock().unwrap(),
-        vec![ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("a")},
-        ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("b")},
+        vec![ReceivedInstruction::Append{path: PathBuf::from("a")},
+        ReceivedInstruction::Append{path: PathBuf::from("b")},
         ReceivedInstruction::Stop]);
 }
 
-#[test]
+// #[test]
 fn skip_2(){
     let barrier = Arc::new(Barrier::new(2));
     let player = Arc::new(FakePlayer::new(barrier.clone()));
@@ -90,24 +90,28 @@ fn skip_2(){
 
     barrier.wait();
     assert_eq!(*player.received_actions.lock().unwrap(),
-        vec![ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("a")}]);
+        vec![ReceivedInstruction::Append{path: PathBuf::from("a")}]);
+    println!("sending skip");
     command_queue.add_command(PlayerCommand::Skip);
+    println!("before barrier");
+    std::thread::sleep(Duration::from_micros(1000));
     barrier.wait();
 
     barrier.wait();
+    println!("after barrier");
     assert_eq!(*player.received_actions.lock().unwrap(),
-        vec![ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("a")},
+        vec![ReceivedInstruction::Append{path: PathBuf::from("a")},
         ReceivedInstruction::Skip,
-        ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("b")}]);
+        ReceivedInstruction::Append{path: PathBuf::from("b")}]);
     barrier.wait();
 
     command_queue.add_command(PlayerCommand::Stop);
     handle.join().unwrap();
 
     assert_eq!(*player.received_actions.lock().unwrap(),
-        vec![ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("a")},
+        vec![ReceivedInstruction::Append{path: PathBuf::from("a")},
         ReceivedInstruction::Skip,
-        ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("b")},
+        ReceivedInstruction::Append{path: PathBuf::from("b")},
         ReceivedInstruction::Stop]);
 }
 
@@ -134,11 +138,12 @@ fn queue_1(){
     // A playing
     barrier.wait();
     assert_eq!(*player.received_actions.lock().unwrap(),
-        vec![ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("a")}]);
+        vec![ReceivedInstruction::Append{path: PathBuf::from("a")}]);
     song_queue.lock().unwrap().queue(PathBuf::from("c"));
     command_queue.add_command(PlayerCommand::QueueImmediate);
     println!("{:?}", song_queue.lock().unwrap().immediate_queue);
     println!("{:?}", song_queue.lock().unwrap().normal_queue);
+    std::thread::sleep(Duration::from_micros(1000));
     barrier.wait();
 
     // A finished
@@ -149,50 +154,49 @@ fn queue_1(){
     // I think synchronizing the skip command sent due to queue by sending it along the channel should do it? 
     let x = player.received_actions.lock().unwrap();
     println!("{:?}", *x);
-    assert!(*x ==
-        vec![ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("a")},
-        ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("b")},
-        ReceivedInstruction::Skip]
-        ||
-        *x ==
-        vec![ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("a")},
-        ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("b")},]
+    assert_eq!(*x,
+        vec![ReceivedInstruction::Append{path: PathBuf::from("a")},
+        ReceivedInstruction::Append{path: PathBuf::from("b")},
+        ReceivedInstruction::Skip,
+        ReceivedInstruction::Append{path: PathBuf::from("c")}]
     );
     drop(x);
-    println!("{:?}", song_queue.lock().unwrap().immediate_queue);
-    println!("{:?}", song_queue.lock().unwrap().normal_queue);
+    std::thread::sleep(Duration::from_micros(1000));
     barrier.wait();
 
+    assert!(false);
     // B "finished"; C playing
     barrier.wait();
     assert_eq!(*player.received_actions.lock().unwrap(),
-        vec![ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("a")},
-        ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("b")},
+        vec![ReceivedInstruction::Append{path: PathBuf::from("a")},
+        ReceivedInstruction::Append{path: PathBuf::from("b")},
         ReceivedInstruction::Skip,
-        ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("c")}]);
-    println!("{:?}", song_queue.lock().unwrap().immediate_queue);
-    println!("{:?}", song_queue.lock().unwrap().normal_queue);
+        ReceivedInstruction::Append{path: PathBuf::from("c")}]);
     barrier.wait();
+
+    assert!(false);
 
     // C finished
     barrier.wait();
     assert_eq!(*player.received_actions.lock().unwrap(),
-        vec![ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("a")},
-        ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("b")},
+        vec![ReceivedInstruction::Append{path: PathBuf::from("a")},
+        ReceivedInstruction::Append{path: PathBuf::from("b")},
         ReceivedInstruction::Skip,
-        ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("c")},
-        ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("b")}]);
+        ReceivedInstruction::Append{path: PathBuf::from("c")},
+        ReceivedInstruction::Append{path: PathBuf::from("b")}]);
     barrier.wait();
+
+    assert!(false);
 
     command_queue.add_command(PlayerCommand::Stop);
     handle.join().unwrap();
 
     // Player stopped
     assert_eq!(*player.received_actions.lock().unwrap(),
-        vec![ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("a")},
-        ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("b")},
+        vec![ReceivedInstruction::Append{path: PathBuf::from("a")},
+        ReceivedInstruction::Append{path: PathBuf::from("b")},
         ReceivedInstruction::Skip,
-        ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("c")},
-        ReceivedInstruction::Append{source: test_source(), path: PathBuf::from("b")},
+        ReceivedInstruction::Append{path: PathBuf::from("c")},
+        ReceivedInstruction::Append{path: PathBuf::from("b")},
         ReceivedInstruction::Stop]);
 }

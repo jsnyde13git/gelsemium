@@ -189,8 +189,8 @@ fn play_gui() -> Result<(), PlayError> {
 
     let mut handle =
         rodio::DeviceSinkBuilder::from_default_device()?
-        // .with_buffer_size(rodio::cpal::BufferSize::Fixed(2048))
-        .with_buffer_size(rodio::cpal::BufferSize::Default)
+        .with_buffer_size(rodio::cpal::BufferSize::Fixed(2048))
+        // .with_buffer_size(rodio::cpal::BufferSize::Default)
         .open_stream()?;
     handle.log_on_drop(true);
     let player = Arc::new(rodio::Player::connect_new(handle.mixer()));
