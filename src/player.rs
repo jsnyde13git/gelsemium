@@ -9,6 +9,7 @@ use std::rc::Rc;
 use std::sync::mpsc::{Receiver, RecvError, Sender, SyncSender, sync_channel};
 use std::sync::{Arc, Barrier, Condvar, Mutex};
 use rodio::decoder::DecoderBuilder;
+use rodio::source::EmptyCallback;
 use rodio::{Decoder, Source};
 use slint::{Model, ModelNotify, ModelRc, SharedString};
 
@@ -27,11 +28,11 @@ pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
     // Put one song in the queue before the main loop.
     // That way we'll always have two songs in the queue, letting us do gapless. (Hopefully)
     // Not the best code I've written but a little break is fine in a short thing I'm sure.
-    // TODO verify that the channel method works
-    let (sender, receiver) = sync_channel(1);
-    let player_copy = player.clone();
-    let queue_copy = command_queue.clone();
-    std::thread::spawn(move || append_thread(&*player_copy, &queue_copy, &receiver));
+    // // TODO verify that the channel method works
+    // let (sender, receiver) = sync_channel(1);
+    // let player_copy = player.clone();
+    // let queue_copy = command_queue.clone();
+    // std::thread::spawn(move || append_thread(&*player_copy, &queue_copy, &receiver));
     #[expect(clippy::missing_panics_doc, reason = "infallible if and only if no other thread panics")]
     while let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()} {
         // song_queue.lock().unwrap().next();
@@ -42,7 +43,7 @@ pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
 
         match decode_song(&filepath){
             Ok(source) => {
-                let _ = sender.send(AppendThreadCommand::Queue(source, filepath));
+                // let _ = sender.send(AppendThreadCommand::Queue(source, filepath));
                 // let player_copy = player.clone();
                 // let cmd_queue_copy = command_queue.clone();
                 // println!("Playing {}", filepath.display());
@@ -51,6 +52,9 @@ pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
                 //     player_copy.sleep_until_end();
                 //     cmd_queue_copy.add_command(PlayerCommand::SongFinished);
                 // });
+                player.append(source, filepath.clone());
+                let cmd_queue_copy = command_queue.clone();
+                player.append(EmptyCallback::new(Box::new(move || cmd_queue_copy.add_command(PlayerCommand::SongFinished))), filepath.clone());
                 #[expect(clippy::missing_panics_doc, reason = "infallible if and only if no other thread panics")]
                 song_queue.lock().unwrap().advance();
 
@@ -81,7 +85,7 @@ pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
             // }
             // println!("queue immediate handling");
             // println!("sending skip");
-            let _ = sender.send(AppendThreadCommand::Skip);
+            // let _ = sender.send(AppendThreadCommand::Skip);
             #[expect(clippy::missing_panics_doc, reason = "infallible if and only if no other thread panics")]
             while let Some(filepath) = {song_queue.lock().unwrap().peek().cloned()}{
                 match decode_song(&filepath){
@@ -89,8 +93,10 @@ pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
                         // let player_copy = player.clone();
                         // let cmd_queue_copy = command_queue.clone();
                         // std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
-                        println!("queue sending {}", filepath.display());
-                        let _ = sender.send(AppendThreadCommand::Queue(source, filepath));
+                        // let _ = sender.send(AppendThreadCommand::Queue(source, filepath));
+                        player.append(source, filepath.clone());
+                        let cmd_queue_copy = command_queue.clone();
+                        player.append(EmptyCallback::new(Box::new(move || cmd_queue_copy.add_command(PlayerCommand::SongFinished))), filepath.clone());
                         break;
                     }
                     Err(err) => {
@@ -124,8 +130,9 @@ pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
                     // let player_copy = player.clone();
                     // let cmd_queue_copy = command_queue.clone();
                     // std::thread::spawn(move || append_and_wait(&*player_copy, source, &filepath, &cmd_queue_copy));
-                    println!("normal sending {}", filepath.display());
-                    let _ = sender.send(AppendThreadCommand::Queue(source, filepath));
+                    player.append(source, filepath.clone());
+                    let cmd_queue_copy = command_queue.clone();
+                    player.append(EmptyCallback::new(Box::new(move || cmd_queue_copy.add_command(PlayerCommand::SongFinished))), filepath.clone());
                     break;
                 }
                 Err(err) => {
@@ -139,11 +146,10 @@ pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
         // song_finished();
         // TODO verify this is fine
         // command_queue.take_commands();
-        println!("about to wait for commands");
-        last_result = wait_for_command(&command_queue, &*player, &song_queue, song_finished, &sender);
+        last_result = wait_for_command(&command_queue, &*player, &song_queue, song_finished);
         // {song_queue.lock().unwrap().advance()};
     }
-    std::mem::drop(sender);
+    // std::mem::drop(sender);
     player.stop();
     // Ensure the player is in the playing state before exiting.
     // If this isn't done, then in GUI mode it'll still be paused
@@ -155,7 +161,7 @@ pub fn play_file_list<T: 'static + PlayerInterface, S: Source + Send + 'static>(
 }
 
 // Returns true if we should stop playing.
-fn wait_for_command<T: PlayerInterface, S: Source + Send + 'static>(command_queue: &PlayerCommandQueue, player: &T, song_queue: &Mutex<SongQueue>, song_finished: &dyn Fn(), sender: &SyncSender<AppendThreadCommand<S>>) -> WaitResult{
+fn wait_for_command<T: PlayerInterface>(command_queue: &PlayerCommandQueue, player: &T, song_queue: &Mutex<SongQueue>, song_finished: &dyn Fn()) -> WaitResult{
     use WaitResult::{Stop, QueuedImmediate, Ok};
     // Read commands. If Skip or SongFinished appears, move to the next song.
     // Note that Skip, since it skips one and we only ever have one in the queue,
@@ -165,7 +171,6 @@ fn wait_for_command<T: PlayerInterface, S: Source + Send + 'static>(command_queu
     while !next_song {
         command_queue.wait_for_command();
         let cmds = command_queue.take_commands();
-        println!("received commands {cmds:?}");
         for cmd in cmds {
             match cmd {
                 PlayerCommand::Pause => {
@@ -183,7 +188,7 @@ fn wait_for_command<T: PlayerInterface, S: Source + Send + 'static>(command_queu
                 PlayerCommand::SongFinished => {
                     next_song = true;
                     if queued_immediate{
-                        // player.skip_one();
+                        player.skip_one();
                     }else{
                         song_queue.lock().unwrap().advance();
                         song_finished();

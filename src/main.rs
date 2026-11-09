@@ -202,6 +202,20 @@ fn play_gui() -> Result<(), PlayError> {
         ui_on_play_playlist(&playlist_name, ui, &playlists_copy_for_play_ui, player);
     });
 
+    {
+        let ui_weak = ui.as_weak();
+        let player = player.clone();
+        let playlists = playlists_mutex.clone();
+        ui.on_edit_playlist(move |playlist_name| ui_on_edit_or_add_playlist(Some(&playlist_name), &ui_weak, &playlists, &player));
+    }
+
+    {
+        let ui_weak = ui.as_weak();
+        let player = player.clone();
+        let playlists = playlists_mutex.clone();
+        ui.on_add_new_playlist(move || ui_on_edit_or_add_playlist(None, &ui_weak, &playlists, &player));
+    }
+
     ui.run().map_err(std::convert::Into::into)
 }
 
@@ -347,6 +361,47 @@ fn ui_on_play_playlist(
 
 fn ui_on_back_to_gui_from_playing(command_queue: &PlayerCommandQueue) {
     command_queue.add_command(PlayerCommand::Stop);
+}
+
+fn ui_on_edit_or_add_playlist(playlist_name: Option<&SharedString>, ui: &Weak<AppWindow>, playlists: &Arc<Mutex<PlaylistCollection>>, player: &Arc<Player>){
+    let ui = ui.unwrap();
+    // We make a copy of the playlists.
+    // That way, we commit the changes to the original object at the same time we write the file,
+    // so there's no possibility of weird desyncs where uncommitted changes still affect execution.
+    let playlists_clone = Arc::new(Mutex::new(playlists.lock().unwrap().clone()));
+
+    let current_key: String = playlist_name.map_or("".to_string(), |name| name.to_string());
+    let current_key = Arc::new(Mutex::new(current_key));
+
+    if let None = playlist_name{
+        playlists.lock().unwrap().push(gelsemium::playlist_data::Playlist::default());
+    }
+
+    {
+        let playlists_copy = playlists_clone.clone();
+        let original_playlists_copy = playlists.clone();
+        ui.on_save(move || {
+            let _ = save_playlists(&playlists_copy.lock().unwrap());
+            *original_playlists_copy.lock().unwrap() = playlists_copy.lock().unwrap().clone();
+        });
+    }
+
+    {
+        let playlists_copy = playlists_clone.clone();
+        ui.on_playlist_renamed(move |name| {
+            let result = playlists_copy.lock().unwrap().rename(&current_key.lock().unwrap(), name.to_string());
+            if let Err(_) = result{
+                eprintln!("Tried to rename a playlist that didn't exist. This is a bug.");
+                eprintln!("Original name: {}", current_key.lock().unwrap());
+                eprintln!("New name: {name}");
+            }else{
+                *current_key.lock().unwrap() = name.to_string();
+            }
+        });
+    }
+
+    // TODO:
+    // Hook up the add playlist and remove playlist methods.
 }
 
 fn ui_on_back_to_gui_from_editing(){
@@ -508,4 +563,17 @@ fn get_playlists_file() -> Result<String, GetPlaylistFileError> {
     }
 
     return Err("Unsupported OS. Supported OSes are: Linux, Windows".into());
+}
+
+fn save_playlists(playlists: &PlaylistCollection) -> Result<(), GetPlaylistFileError>{
+    let filepath = get_playlists_file()?;
+    let filepath = PathBuf::from(filepath);
+
+    let mut file = File::create(filepath).unwrap();
+    use std::io::Write;
+    write!(file, "{}", playlists).unwrap();
+
+    println!("playlists written!");
+
+    Ok(())
 }

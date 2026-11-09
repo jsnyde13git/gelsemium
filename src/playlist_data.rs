@@ -3,6 +3,7 @@ use std::{fmt::Display, path::PathBuf};
 use crate::playlist_parser::{self, ExpandDirOptions};
 
 // Holds the collection of all the playlists.
+#[derive(Clone)]
 pub struct PlaylistCollection{
     playlists: Vec<Playlist>,
 }
@@ -32,6 +33,16 @@ impl PlaylistCollection{
         // getting the address of its internal str.
         self.playlists.iter().map(|p| &*p.name)
     }
+
+    pub fn rename(&mut self, original_name: &str, new_name: String) -> Result<(), ()>{
+        let playlist_maybe = self.playlists.iter_mut().find(|p| p.name == *original_name);
+        if let Some(playlist) = playlist_maybe{
+            playlist.name = new_name;
+            Ok(())
+        }else{
+            Err(())
+        }
+    }
 }
 
 impl Default for PlaylistCollection {
@@ -49,7 +60,8 @@ impl Display for PlaylistCollection{
     }
 }
 
-// Holds a singular playlist, not including the name.
+// Holds a singular playlist.
+#[derive(Clone)]
 pub struct Playlist{
     data: Vec<PlaylistSong>,
     name: String,
@@ -99,7 +111,17 @@ impl Display for Playlist{
     }
 }
 
+impl Default for Playlist{
+    fn default() -> Self{
+        Playlist{
+            data: Vec::new(),
+            name: String::new(),
+        }
+    }
+}
+
 // Holds one song in the playlists file.
+#[derive(Clone)]
 pub struct PlaylistSong{
     path: PathBuf,
 }
