@@ -25,6 +25,11 @@ impl PlaylistCollection{
         self.playlists.iter().find(|p| p.name == *name)
     }
 
+    #[must_use]
+    pub fn get_mut(&mut self, name: &str) -> Option<&mut Playlist>{
+        self.playlists.iter_mut().find(|p| p.name == *name)
+    }
+
     pub fn names(&self) -> impl Iterator<Item = &str>{
         // Weird deref-into-take-address construct here.
         // What we're doing here is using that String implements Deref<str>,
@@ -84,8 +89,16 @@ impl Playlist{
         (paths, errors)
     }
 
+    pub fn push(&mut self, song: PlaylistSong){
+        self.data.push(song);
+    }
+
+    pub fn remove(&mut self, index: usize){
+        self.data.remove(index);
+    }
+
     // temporary messy method
-    fn to_strings(&self) -> Vec<String>{
+    pub fn to_strings(&self) -> Vec<String>{
         let mut strs = Vec::new();
         for data in &self.data{
             strs.push(data.path.to_string_lossy().to_string());

@@ -303,6 +303,23 @@ impl Library {
         self.tracker.reset();
         return result;
     }
+
+    pub fn hide_or_get_song(&self, index: usize) -> Option<PathBuf>{
+        if let Some(elem) = self.contents.borrow_mut().find_mut(index, 0){
+            match elem {
+                InternalLibraryElem::Folder(folder) => {
+                    folder.hidden = !folder.hidden;
+                    self.tracker.reset();
+                    None
+                },
+                InternalLibraryElem::Song(song) => {
+                    Some(song.path.clone())
+                },
+            }
+        }else{
+            None
+        }
+    }
 }
 
 // impl Library {

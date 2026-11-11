@@ -109,6 +109,10 @@ component EditMenu inherits Rectangle{
     callback playlist_renamed(string);
     callback save();
 
+    in property<[string]> song_list: [];
+    in property<[LibraryElem]> library: [];
+    in property<string> initial_name: "";
+
     background: bg_color;
     in property<brush> bg_color: #f675f6;
     in property<brush> elem_bg_color: #672b78;
@@ -141,9 +145,10 @@ component EditMenu inherits Rectangle{
                 // Text input
                 Rectangle{                    
                     background: elem_bg_color;
-                    LineEdit {
+                    name := LineEdit {
                         width: 100%;
                         placeholder-text: "Playlist Name";
+                        text: initial_name;
                         accepted(text) => {
                             self.clear-focus();
                             playlist_renamed(text);
@@ -153,12 +158,14 @@ component EditMenu inherits Rectangle{
 
             }
             PlaylistEditListing{
+                song_list: song_list;
                 background: elem_bg_color;
+                song_removed_from_playlist(i) => song_removed_from_playlist(i);
             }
         }
 
         SongLibrary{
-            song_names: [];
+            song_names: library;
             library_elem_clicked(index) => song_added_to_playlist(index); 
         }
     }    
@@ -466,6 +473,8 @@ export component AppWindow inherits Window {
     callback song_removed_from_playlist(int);
     callback playlist_renamed(string);
     callback save();
+    in property<[string]> edited_playlist_song_names;
+    in property<string> edit_playlist_initial_name;
 
     // General properties.
     title: "Gelsemium Music Player";
@@ -521,6 +530,9 @@ export component AppWindow inherits Window {
     }
     if state == ScreenState.editing: edit_menu := EditMenu{
         background: bg_color;
+        song_list: edited_playlist_song_names;
+        library: library;
+        initial_name: edit_playlist_initial_name;
         back_pressed => {
             state = ScreenState.select;
             back_to_menu_from_editing();

@@ -1,6 +1,6 @@
 use rodio::Player;
 use gelsemium::playlist_data::PlaylistCollection;
-use slint::{ComponentHandle, Model, ModelRc, PlatformError, SharedString, Weak};
+use slint::{ComponentHandle, Model, ModelRc, PlatformError, SharedString, VecModel, Weak};
 use std::env::{self, home_dir};
 use std::error::Error;
 use std::fs::{File, create_dir_all};
@@ -302,6 +302,7 @@ fn ui_on_play_playlist(
     }
     
 
+    // Connect the song queueing function.
     {
         let command_queue_ref = command_queue.clone();
         // let ui_ref = ui.as_weak();
@@ -373,10 +374,36 @@ fn ui_on_edit_or_add_playlist(playlist_name: Option<&SharedString>, ui: &Weak<Ap
     let current_key: String = playlist_name.map_or("".to_string(), |name| name.to_string());
     let current_key = Arc::new(Mutex::new(current_key));
 
-    if let None = playlist_name{
-        playlists.lock().unwrap().push(gelsemium::playlist_data::Playlist::default());
+    let playlist_model;
+
+    match playlist_name{
+        None => {
+            playlists_clone.lock().unwrap().push(gelsemium::playlist_data::Playlist::default());
+            playlist_model = ModelRc::new(VecModel::default());
+            ui.set_edit_playlist_initial_name("".into());
+        }
+        Some(name) => {
+            // If we're at this point, the user clicked an edit playlist button.
+            // Given that that button had to exist for the user to click it,
+            // I think it's safe to assume the playlist exists.
+            let lock = playlists.lock().unwrap();
+            #[allow(clippy::expect_used)]
+            let playlist_paths = lock
+                .get(name.as_ref())
+                .expect("ERROR: Tried to play playlist that didn't exist; this is a bug");
+            playlist_model = VecModel::from_slice(&playlist_paths.to_strings().iter().map(|s| s.into()).collect::<Vec<SharedString>>()[..]);
+            ui.set_edit_playlist_initial_name(name.clone());
+        }
     }
 
+    ui.set_edited_playlist_song_names(playlist_model.clone());
+
+    let library = Rc::new(Library::get_library(&playlists.lock().unwrap()));
+    let library_model = ModelRc::new(library.clone());
+
+    ui.set_library(library_model.clone());
+
+    // Save button.
     {
         let playlists_copy = playlists_clone.clone();
         let original_playlists_copy = playlists.clone();
@@ -386,23 +413,80 @@ fn ui_on_edit_or_add_playlist(playlist_name: Option<&SharedString>, ui: &Weak<Ap
         });
     }
 
+    // Rename functionality.
     {
+        let current_key_copy = current_key.clone();
         let playlists_copy = playlists_clone.clone();
         ui.on_playlist_renamed(move |name| {
-            let result = playlists_copy.lock().unwrap().rename(&current_key.lock().unwrap(), name.to_string());
+            let result = playlists_copy.lock().unwrap().rename(&current_key_copy.lock().unwrap(), name.to_string());
             if let Err(_) = result{
                 eprintln!("Tried to rename a playlist that didn't exist. This is a bug.");
-                eprintln!("Original name: {}", current_key.lock().unwrap());
+                eprintln!("Original name: {}", current_key_copy.lock().unwrap());
                 eprintln!("New name: {name}");
             }else{
-                *current_key.lock().unwrap() = name.to_string();
+                *current_key_copy.lock().unwrap() = name.to_string();
             }
         });
     }
 
-    // TODO:
-    // Hook up the add playlist and remove playlist methods.
+    // Add playlist
+    {
+        let current_key_copy = current_key.clone();
+        let playlists_copy = playlists_clone.clone();
+        let library_copy = library.clone();
+        let playlist_model_copy = playlist_model.clone();
+        ui.on_song_added_to_playlist(move |index| {
+            // False positive. 
+            #[allow(clippy::cast_sign_loss)]
+            let index = if index < 0{
+                eprintln!("Invalid index {index} passed to on_song_queued. This is a bug.");
+                return;
+            }else {
+                std::cmp::max(0, index) as usize
+            };
+            let song_path_maybe = library_copy.hide_or_get_song(index);
+            if let Some(song_path) = song_path_maybe{
+                let mut lock = playlists_copy.lock().unwrap();
+                let playlist_maybe = lock.get_mut(&current_key_copy.lock().unwrap());
+                if let Some(playlist) = playlist_maybe{
+                    let _ = playlist_model_copy.push_row(song_path.to_string_lossy().into_owned().into());
+                    playlist.push(gelsemium::playlist_data::PlaylistSong::new(song_path));
+                }else{
+                    eprintln!("Tried to append to a playlist that didn't exist. This is a bug.");
+                    eprintln!("Playlist name: {}", current_key_copy.lock().unwrap());
+                }
+            }
+        });
+    }
+
+    // Remove playlist
+    {
+        let current_key_copy = current_key.clone();
+        let playlists_copy = playlists_clone.clone();
+        let playlist_model_copy = playlist_model.clone();
+        ui.on_song_removed_from_playlist(move |index| {
+            // False positive. 
+            #[allow(clippy::cast_sign_loss)]
+            let index = if index < 0{
+                eprintln!("Invalid index {index} passed to on_song_queued. This is a bug.");
+                return;
+            }else {
+                std::cmp::max(0, index) as usize
+            };
+            let mut lock = playlists_copy.lock().unwrap();
+            let playlist_maybe = lock.get_mut(&current_key_copy.lock().unwrap());
+            if let Some(playlist) = playlist_maybe{
+                let _ = playlist_model_copy.remove_row(index);
+                playlist.remove(index);
+            }else{
+                eprintln!("Tried to remove from a playlist that didn't exist. This is a bug.");
+                eprintln!("Playlist name: {}", current_key_copy.lock().unwrap());
+            }
+            
+        });
+    }
 }
+
 
 fn ui_on_back_to_gui_from_editing(){
     
