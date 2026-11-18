@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use gelsemium::player::{self, PlayerCommand, PlayerCommandQueue, SongQueue, VecDequeModel, create_song_models, play_file_list};
 use gelsemium::playlist_parser::{is_valid_filetype, parse_playlists};
 use gelsemium::playlist_parser::{ExpandDirOptions};
-use gelsemium::ui::{AppWindow};
+use gelsemium::ui::{Api, AppWindow};
 use gelsemium::library::Library;
 
 fn main() {
@@ -152,29 +152,14 @@ fn play_gui() -> Result<(), PlayError> {
     //     maximize_ptr.unwrap().window().set_maximized(true); println!("maximized")
     // }).unwrap();
 
-    // let playlists = match read_playlists() {
-    //     Ok(p) => p,
-    //     Err(err) => {
-    //         eprintln!("Error reading playlists: {err}");
-    //         exit(1);
-    //     }
-    // };
+    // Set the API stuff.
+    let api = ui.global::<Api>();
+    api.on_int_to_transfer(int_to_datatransfer);
+    api.on_transfer_to_int(datatransfer_to_int_or_default);
+
     let playlists = read_playlists()
         .map_err(PlayError::Playlist)?;
 
-    // let lib_default = Vec::new();
-    // let library_initial = playlists.get("Library").unwrap_or(&lib_default);
-    // let (library_paths, _) =
-    //     get_playlist_filepaths(library_initial, ExpandDirOptions::DiscardFolderNames);
-    // let library_paths = library_paths
-    //     .into_iter()
-    //     .map(|(depth, path)| (depth as i32, path))
-    //     .collect::<Vec<(i32, PathBuf)>>();
-
-    // We could refactor this to make it more optimized.
-    // The cloning is probably difficult to remove (the UI and backend both need access),
-    // but we could remove the .keys and instead have playlists directly return names.
-    // If load times become an issue that's an idea, but it's not worth it right now.
     let playlist_names = slint::ModelRc::new(slint::VecModel::from(
         playlists
             .names()
@@ -407,9 +392,18 @@ fn ui_on_edit_or_add_playlist(playlist_name: Option<&SharedString>, ui: &Weak<Ap
     {
         let playlists_copy = playlists_clone.clone();
         let original_playlists_copy = playlists.clone();
+        let ui_weak = ui.as_weak();
         ui.on_save(move || {
             let _ = save_playlists(&playlists_copy.lock().unwrap());
             *original_playlists_copy.lock().unwrap() = playlists_copy.lock().unwrap().clone();
+
+            let playlist_names = slint::ModelRc::new(slint::VecModel::from(
+                playlists_copy.lock().unwrap()
+                    .names()
+                    .map(std::convert::Into::into)
+                    .collect::<Vec<slint::SharedString>>(),
+            ));
+            ui_weak.upgrade().unwrap().set_playlist_names(playlist_names);
         });
     }
 
@@ -482,7 +476,51 @@ fn ui_on_edit_or_add_playlist(playlist_name: Option<&SharedString>, ui: &Weak<Ap
                 eprintln!("Tried to remove from a playlist that didn't exist. This is a bug.");
                 eprintln!("Playlist name: {}", current_key_copy.lock().unwrap());
             }
-            
+        });
+    }
+
+    // Move playlist
+    {
+        let playlists_copy = playlists_clone.clone();
+        let playlist_model_copy = playlist_model.clone();
+        let current_key_copy = current_key.clone();
+        ui.on_song_dragged(move |origin, end|{
+            if origin == -1 {return;}
+
+            let mut playlists = playlists_copy.lock().unwrap();
+            let playlist_maybe = playlists.get_mut(&current_key_copy.lock().unwrap());
+            if let Some(playlist) = playlist_maybe{
+                let moved_song = playlist.get(origin as usize);
+                let moved_song = if let Some(song) = moved_song{
+                    song
+                }else{
+                    return;
+                }.clone();
+                let moved_name = playlist_model_copy.row_data(origin as usize);
+                let moved_name = if let Some(name) = moved_name{
+                    name
+                }else{
+                    return;
+                }.clone();
+
+                // Start first: place then remove
+                if origin < end{
+                    playlist.insert(end as usize, moved_song);
+                    playlist.remove(origin as usize);
+                    let _ = playlist_model_copy.insert_row(end as usize, moved_name);
+                    let _ = playlist_model_copy.remove_row(origin as usize);
+                }
+                // End first: remove then place
+                else if end < origin{
+                    playlist.remove(origin as usize);
+                    playlist.insert(end as usize, moved_song);
+                    let _ = playlist_model_copy.remove_row(origin as usize);
+                    let _ = playlist_model_copy.insert_row(end as usize, moved_name);
+                }
+            }else{
+                eprintln!("Tried to move items in a playlist that didn't exist. This is a bug.");
+                eprintln!("Playlist name: {}", current_key_copy.lock().unwrap());
+            }
         });
     }
 }
@@ -490,6 +528,22 @@ fn ui_on_edit_or_add_playlist(playlist_name: Option<&SharedString>, ui: &Weak<Ap
 
 fn ui_on_back_to_gui_from_editing(){
     
+}
+
+fn int_to_datatransfer(i: i32) -> slint::DataTransfer{
+    let int_rc = Rc::new(i);
+    let mut transfer = slint::DataTransfer::default();
+    transfer.set_user_data(int_rc);
+    transfer
+}
+
+fn datatransfer_to_int_or_default(data: slint::DataTransfer) -> i32{
+    let user_data = data.user_data();
+    if let Some(Ok(userd)) = user_data.map(|d| d.downcast::<i32>()){
+        *userd
+    }else{
+        -1
+    }
 }
 
 fn read_playlists() -> Result<PlaylistCollection, Box<dyn Error>> {

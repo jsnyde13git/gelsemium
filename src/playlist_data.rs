@@ -97,6 +97,14 @@ impl Playlist{
         self.data.remove(index);
     }
 
+    pub fn insert(&mut self, index: usize, song: PlaylistSong){
+        self.data.insert(index, song);
+    }
+
+    pub fn get(&self, index: usize) -> Option<&PlaylistSong>{
+        self.data.get(index)
+    }
+
     // temporary messy method
     pub fn to_strings(&self) -> Vec<String>{
         let mut strs = Vec::new();

@@ -1,6 +1,11 @@
 import { Button, VerticalBox, TextEdit, HorizontalBox, ScrollView, ListView, LineEdit } from "std-widgets.slint";
 // import "./LeagueMono-VF.ttf";
 
+export global Api{
+    pure callback int_to_transfer(int) -> data-transfer;
+    pure callback transfer_to_int(data-transfer) -> int;
+}
+
 struct LibraryElem{
     name: string,
     nest_level: int,
@@ -22,8 +27,10 @@ component SongLibrary inherits Rectangle{
 
     property<length> offset_per_nest: 20px;
     callback library_elem_clicked(int);
+    callback library_elem_clicked_with_plus(int);
     callback library_add_clicked();
     property<length> lib_width: self.width;
+    in property<bool> has_add_buttons: false;
 
     VerticalBox{
         padding: 0;
@@ -35,22 +42,37 @@ component SongLibrary inherits Rectangle{
                 preferred-height: !song.is_hidden ? 22px : 0px;
 
                 if !song.is_hidden: Rectangle{
-                    accessible-role: button;
-                    accessible-label: song.name;
-
                     preferred-width: lib_width - parent.x;
-                    background: ta.has-hover ? elem_hover_color : root.background;
-                    animate background {duration: 100ms;}
-                    ta := TouchArea{
-                        preferred-height: 100%;
-                        preferred-width: 100%;
-                        Text{
-                            x: 0;
-                            text: song.name;
-                            horizontal-alignment: start;
+                    HorizontalBox{
+                        padding: 0;
+
+                        Rectangle{
+                            background: ta.has-hover ? elem_hover_color : root.background;
+                            animate background {duration: 100ms;}
+                            ta := TouchArea{
+                                accessible-role: button;
+                                accessible-label: song.name;
+
+                                preferred-height: 100%;
+                                preferred-width: 100%;
+                                Text{
+                                    x: 0;
+                                    text: song.name;
+                                    horizontal-alignment: start;
+                                }
+                                
+                                clicked => library_elem_clicked(i);
+                            }
                         }
                         
-                        clicked => library_elem_clicked(i);
+                        if has_add_buttons: TouchArea{
+                            Image{
+                                source: @image-url("plusbutton.svg");
+                                colorize: button_color;
+                                transform-scale: 0.5;
+                            }
+                            clicked => library_elem_clicked_with_plus(i);
+                        }
                     }
                 }
             }
@@ -71,21 +93,26 @@ component SongLibrary inherits Rectangle{
 
 component PlaylistEditListing inherits Rectangle{
     callback song_removed_from_playlist(int);
+    callback song_dragged(int, int); // origin, end
 
-    // in property<[string]> song_list: ["examplesong1", "examplesong2"];
-    in property<[string]> song_list: [];
+    in property<[string]> song_list: ["examplesong1", "examplesong2"];
+    // in property<[string]> song_list: [];
     in property<brush> elem_hover_color: #3a1644;
     in property<brush> button_color: #fbb5fb;
 
     ListView{
-        for song[i] in song_list: Rectangle{
+        for song[i] in song_list: s := Rectangle{
             background: ta.has-hover ? #3a1644 : root.background;
             animate background {duration: 100ms;}
             ta := TouchArea{
                 HorizontalBox{
-                    // TODO: Drag area
-                    Text{
-                        text: song;
+                    padding: 0px;
+                    DragArea{
+                        data: Api.int_to_transfer(i);
+                        allow-move: true;
+                        Text{
+                            text: song;
+                        }
                     }
                     // remove button (X)
                     Rectangle{}
@@ -98,6 +125,46 @@ component PlaylistEditListing inherits Rectangle{
                     }
                 }
             }
+
+            da := DropArea{
+                y: -5px;
+                height: 40px;
+                can-drop => {
+                    DragAction.move
+                }
+                dropped(event) => {
+                    song_dragged(Api.transfer_to_int(event.data), i);
+                    // debug(Api.transfer_to_int(event.data));
+                    return event.proposed-action;
+                }
+            }
+
+            Rectangle{
+                height: 1px;
+                y: 0;
+                background: da.has-drag ? elem_hover_color : root.background;
+            }
+
+            if i == song_list.length - 1: Rectangle{
+                da_final := DropArea{
+                    y: ta.height - 5px;
+                    height: 40px;
+                    can-drop => {
+                        DragAction.move
+                    }
+                    dropped(event) => {
+                        song_dragged(Api.transfer_to_int(event.data), i+1);
+                        // debug(Api.transfer_to_int(event.data));
+                        return event.proposed-action;
+                    }
+                }
+
+                Rectangle{
+                    height: 1px;
+                    y: ta.height;
+                    background: da_final.has-drag ? elem_hover_color : root.background;
+                }
+            }
         }
     }
 }
@@ -107,6 +174,7 @@ component EditMenu inherits Rectangle{
     callback song_added_to_playlist(int);
     callback song_removed_from_playlist(int);
     callback playlist_renamed(string);
+    callback song_dragged(int, int);
     callback save();
 
     in property<[string]> song_list: [];
@@ -161,12 +229,14 @@ component EditMenu inherits Rectangle{
                 song_list: song_list;
                 background: elem_bg_color;
                 song_removed_from_playlist(i) => song_removed_from_playlist(i);
+                song_dragged(origin, end) => song_dragged(origin, end);
             }
         }
 
         SongLibrary{
             song_names: library;
             library_elem_clicked(index) => song_added_to_playlist(index); 
+            has_add_buttons: true;
         }
     }    
 }
@@ -352,6 +422,7 @@ component PlayingMenu inherits Rectangle{
             song_names: library;
             elem_hover_color: elem_hover_color;
             button_color: button_color;
+            has_add_buttons: false;
             library_elem_clicked(index) => library_elem_clicked(index);
         }
     }
@@ -472,6 +543,7 @@ export component AppWindow inherits Window {
     callback song_added_to_playlist(int);
     callback song_removed_from_playlist(int);
     callback playlist_renamed(string);
+    callback song_dragged(int, int);
     callback save();
     in property<[string]> edited_playlist_song_names;
     in property<string> edit_playlist_initial_name;
@@ -541,5 +613,6 @@ export component AppWindow inherits Window {
         song_added_to_playlist(index) => song_added_to_playlist(index);
         song_removed_from_playlist(index) => song_removed_from_playlist(index);
         playlist_renamed(name) => playlist_renamed(name);
+        song_dragged(origin, end) => song_dragged(origin, end);
     }
 }
